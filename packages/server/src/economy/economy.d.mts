@@ -48,16 +48,27 @@ export class Ledger {
   sum(): number;
 }
 
+export interface ShipRec { owner: string; cls: string; dockedAt: string; }
+
 export class Exchange {
   accounts: Map<string, Account>;
   openOrders: Map<number, Order>;
   trades: Trade[];
   ledger: Ledger;
+  located: boolean;                       // when true, goods live in per-(owner,island) warehouses
+  minted: number;                         // total PoE minted via account openings (faucet baseline)
+  mintedUnits: Record<string, number>;    // total units minted via openings + production
+  ships?: Map<string, ShipRec>;           // added by the Market layer (located inventory)
+  _sid?: number;                          // ship-id counter (Market layer)
 
   createAccount(id: string, poe?: number, inv?: Record<string, number>): Account;
   acct(id: string): Account;
   poeOf(id: string): number;
   invOf(id: string, commodity: string): number;
+
+  whId(owner: string, island: string): string;
+  mint(id: string, commodity: string, qty: number): void;
+  burn(id: string, commodity: string, qty: number): void;
 
   totalPoe(): number;
   totalUnits(commodity: string): number;

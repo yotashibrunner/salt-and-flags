@@ -27,6 +27,16 @@ export class Exchange {
     this.trades = [];                   // immutable trade log
     this.ledger = new Ledger();
     this._oid = 0; this._seq = 0;
+    // When false, an order owner's goods live on the owner account (the engine
+    // stays location-agnostic — what its own unit tests assume). When true (the
+    // Market flips it on), goods live in per-(owner,island) WAREHOUSE accounts, so
+    // a good is physical: it can only be sold where it sits. PoE is always global.
+    this.located = false;
+    // faucet accounting baselines: PoE/units only enter play via account creation
+    // (opening balances) + production mint. totalPoe()===minted and
+    // totalUnits(c)===mintedUnits[c] are the conservation invariants the fuzzer checks.
+    this.minted = 0;
+    this.mintedUnits = {};
     this.createAccount("ESCROW", 0);    // holds reserved funds/goods for resting orders
   }
 
@@ -34,6 +44,8 @@ export class Exchange {
   createAccount(id, poe = 0, inv = {}) {
     if (this.accounts.has(id)) throw new Error(`account exists: ${id}`);
     this.accounts.set(id, { id, poe, inv: { ...inv } });
+    this.minted += poe;                                       // opening PoE is a faucet
+    for (const c in inv) this.mintedUnits[c] = (this.mintedUnits[c] || 0) + inv[c];
     return this.accounts.get(id);
   }
   acct(id) {
@@ -43,6 +55,33 @@ export class Exchange {
   }
   poeOf(id) { return this.acct(id).poe; }
   invOf(id, c) { return this.acct(id).inv[c] || 0; }
+
+  // --- located goods plumbing ---
+  whId(owner, island) { return `wh:${owner}:${island}`; }    // warehouse account id
+  // get (lazily creating) a goods-holding account by id
+  _inv(id) {
+    let a = this.accounts.get(id);
+    if (!a) a = this.createAccount(id, 0);
+    return a;
+  }
+  // the account that holds `owner`'s tradable goods for `island`: the warehouse
+  // when located, else the owner account (engine-default, location-agnostic).
+  _goods(owner, island) {
+    return this.located ? this._inv(this.whId(owner, island)) : this.acct(owner);
+  }
+  // mint/burn are the ONLY non-transfer unit movements (onboarding grants, NPC
+  // seed stock, production). They keep mintedUnits in lockstep with totalUnits.
+  mint(id, commodity, qty) {
+    const a = this._inv(id);
+    a.inv[commodity] = (a.inv[commodity] || 0) + qty;
+    this.mintedUnits[commodity] = (this.mintedUnits[commodity] || 0) + qty;
+  }
+  burn(id, commodity, qty) {
+    const a = this.acct(id);
+    if ((a.inv[commodity] || 0) < qty) throw new Error(`insufficient ${commodity} to burn`);
+    a.inv[commodity] -= qty;
+    this.mintedUnits[commodity] = (this.mintedUnits[commodity] || 0) - qty;
+  }
 
   // --- conservation checks (test/ops use these) ---
   totalPoe() { let t = 0; for (const a of this.accounts.values()) t += a.poe; return t; }
@@ -75,8 +114,9 @@ export class Exchange {
       a.poe -= cost; ESC.poe += cost;
       this.ledger.postPair(ownerId, "ESCROW", cost, "escrow_buy");
     } else if (side === "sell") {
-      if ((a.inv[commodity] || 0) < qty) throw new Error("insufficient goods to escrow sell");
-      a.inv[commodity] -= qty; ESC.inv[commodity] = (ESC.inv[commodity] || 0) + qty;
+      const g = this._goods(ownerId, island);    // warehouse at this island when located
+      if ((g.inv[commodity] || 0) < qty) throw new Error("insufficient goods to escrow sell");
+      g.inv[commodity] -= qty; ESC.inv[commodity] = (ESC.inv[commodity] || 0) + qty;
     } else throw new Error("side must be buy or sell");
 
     const order = { id: ++this._oid, owner: ownerId, side, price, qty, island, commodity, ts: ++this._seq };
@@ -101,7 +141,7 @@ export class Exchange {
       const q = Math.min(order.qty, top.qty);
       const buyOrder = order.side === "buy" ? order : top;
       const sellOrder = order.side === "buy" ? top : order;
-      this._settle(buyOrder, sellOrder, order.commodity, tpx, q);
+      this._settle(buyOrder, sellOrder, order.commodity, tpx, q, order.island);
       order.qty -= q; top.qty -= q; b.last = tpx;
       this.trades.push({ island: order.island, commodity: order.commodity, price: tpx, qty: q, buyer: buyOrder.owner, seller: sellOrder.owner });
       if (top.qty <= 0) { opp.shift(); this.openOrders.delete(top.id); }
@@ -110,22 +150,23 @@ export class Exchange {
 
   // settle one fill of q units at price tpx between a buy order and a sell order,
   // both of which escrowed their side at placement.
-  _settle(buyOrder, sellOrder, commodity, tpx, q) {
+  _settle(buyOrder, sellOrder, commodity, tpx, q, island) {
     const ESC = this.acct("ESCROW");
-    const buyer = this.acct(buyOrder.owner);
+    const buyerPurse = this.acct(buyOrder.owner);
+    const buyerGoods = this._goods(buyOrder.owner, island); // warehouse at this island when located
     const seller = this.acct(sellOrder.owner);
 
-    // goods: seller's escrowed units -> buyer
+    // goods: seller's escrowed units -> buyer's goods store at this island
     ESC.inv[commodity] -= q;
-    buyer.inv[commodity] = (buyer.inv[commodity] || 0) + q;
+    buyerGoods.inv[commodity] = (buyerGoods.inv[commodity] || 0) + q;
 
     // PoE: buyer escrowed at buyOrder.price; pay seller tpx*q, refund the overpay
     ESC.poe -= tpx * q; seller.poe += tpx * q;
     this.ledger.postPair("ESCROW", seller.id, tpx * q, "fill");
     const refund = (buyOrder.price - tpx) * q;     // 0 when buyer is the resting side
     if (refund > 0) {
-      ESC.poe -= refund; buyer.poe += refund;
-      this.ledger.postPair("ESCROW", buyer.id, refund, "price_improve_refund");
+      ESC.poe -= refund; buyerPurse.poe += refund;
+      this.ledger.postPair("ESCROW", buyerPurse.id, refund, "price_improve_refund");
     }
   }
 
@@ -143,7 +184,8 @@ export class Exchange {
       this.ledger.postPair("ESCROW", order.owner, back, "cancel_refund");
     } else {
       ESC.inv[order.commodity] -= order.qty;
-      this.acct(order.owner).inv[order.commodity] = (this.acct(order.owner).inv[order.commodity] || 0) + order.qty;
+      const g = this._goods(order.owner, order.island); // back to the warehouse it came from
+      g.inv[order.commodity] = (g.inv[order.commodity] || 0) + order.qty;
     }
     this.openOrders.delete(orderId);
     return true;

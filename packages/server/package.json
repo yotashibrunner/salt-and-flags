@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "migrate": "tsx src/db.ts migrate",
-    "test": "node --test src/economy/economy.test.mjs src/economy/market.test.mjs src/economy/persistence.test.mjs src/pillage/battle.test.mjs",
+    "test": "node --test src/economy/economy.test.mjs src/economy/market.test.mjs src/economy/persistence.test.mjs src/economy/fuzz.test.mjs src/pillage/battle.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "persist:live": "tsx persist.live.mts"
   },

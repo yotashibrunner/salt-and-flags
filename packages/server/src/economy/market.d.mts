@@ -16,6 +16,7 @@ export const WARCHEST: string;
 export const FLAGS: string[];
 export const BOUNTY: string;
 export const BOUNTY_RESERVE: number;
+export const SHIP_CARGO: Record<string, number>;
 
 export interface Recipe {
   id: string;
@@ -28,9 +29,14 @@ export const RECIPES: Recipe[];
 
 // --- persistence shapes ---
 export type Intent =
-  | { seq: number; kind: "account"; owner: string; poe: number; inv: Record<string, number>; ts: number }
+  | { seq: number; kind: "account"; owner: string; poe: number; ts: number }
+  | { seq: number; kind: "grant"; owner: string; island: string; inv: Record<string, number> }
+  | { seq: number; kind: "ship"; id: string; owner: string; cls: string; dockedAt: string }
   | { seq: number; kind: "place"; owner: string; island: string; commodity: string; side: Side; price: number; qty: number; flag: string | null; rate: number }
   | { seq: number; kind: "cancel"; ref: number }
+  | { seq: number; kind: "load"; owner: string; ship: string; commodity: string; qty: number; island: string }
+  | { seq: number; kind: "unload"; owner: string; ship: string; commodity: string; qty: number; island: string }
+  | { seq: number; kind: "move"; owner: string; ship: string; to: string }
   | { seq: number; kind: "build"; owner: string; island: string; recipe: string; to: string }
   | { seq: number; kind: "produce"; owner: string; island: string; recipe: string; ts: number }
   | { seq: number; kind: "pledge"; owner: string; flag: string }
@@ -74,12 +80,21 @@ export interface RestingOrder {
   qty: number;
 }
 
+export interface ShipBalance {
+  id: string;
+  cls: string;
+  dockedAt: string;
+  cargoCap: number;
+  hold: Record<string, number>;
+}
+
 export interface Balances {
   poe: number;
   labor: number;
-  holdings: Record<string, number>;
+  holdings: Record<string, number>; // warehouse stock ON THIS ISLAND
   orders: RestingOrder[];
   stalls: string[]; // recipe ids this player owns a stall for on this island
+  ships: ShipBalance[]; // the captain's whole fleet + each hold's contents
   pledged: boolean; // pledged to this island's controlling flag?
   myFlags: string[]; // every flag this player is pledged to
 }
@@ -113,6 +128,10 @@ export class Market {
   payout(playerId: string): number;
   produce(playerId: string, recipeId: string): Recipe;
   cancel(playerId: string, orderId: number): string | null;
+
+  loadCargo(playerId: string, shipId: string, commodity: string, qty: number): void;
+  unloadCargo(playerId: string, shipId: string, commodity: string, qty: number): void;
+  moveShip(playerId: string, shipId: string, toIsland: string): void;
 
   flush(): Promise<void>;
 

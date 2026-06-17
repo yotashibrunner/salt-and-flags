@@ -17,7 +17,7 @@ import type { Client } from "colyseus";
 const { Room } = colyseusPkg;
 import { Schema, type, MapSchema, ArraySchema } from "@colyseus/schema";
 import type { Market } from "../economy/market.mjs";
-import { STALL_COST, CONQUEST_COST, FLAGS } from "../economy/market.mjs";
+import { STALL_COST, CONQUEST_COST, FLAGS, SHIP_CARGO } from "../economy/market.mjs";
 import { getHub } from "../economy/hub.js";
 import { getIsland } from "../world/registry.js";
 
@@ -52,6 +52,8 @@ interface ProduceMsg { recipeId: string; }
 interface BuildMsg { recipeId: string; }
 interface PledgeMsg { flag?: string; }
 interface SeizeMsg { flag: string; }
+interface CargoMsg { shipId: string; commodity: string; qty: number; }
+interface MoveMsg { shipId: string; toIsland: string; }
 
 export class MarketRoom extends Room<MarketState> {
   maxClients = 64;
@@ -158,6 +160,39 @@ export class MarketRoom extends Room<MarketState> {
       }
     });
 
+    // --- cargo: move goods between this port's warehouse and a docked ship's hold,
+    // and sail a ship to another port (instant stub). All change located inventory
+    // only (no book/PoE), so just resync the acting client's balances. ---
+    this.onMessage<CargoMsg>("load", async (client, msg) => {
+      try {
+        this.market.loadCargo(this.pid(client), String(msg?.shipId), String(msg?.commodity), Number(msg?.qty));
+        await this.market.flush();
+        this.pushBalances();
+      } catch (e) {
+        client.send("error", { message: errMsg(e) });
+      }
+    });
+
+    this.onMessage<CargoMsg>("unload", async (client, msg) => {
+      try {
+        this.market.unloadCargo(this.pid(client), String(msg?.shipId), String(msg?.commodity), Number(msg?.qty));
+        await this.market.flush();
+        this.pushBalances();
+      } catch (e) {
+        client.send("error", { message: errMsg(e) });
+      }
+    });
+
+    this.onMessage<MoveMsg>("move", async (client, msg) => {
+      try {
+        this.market.moveShip(this.pid(client), String(msg?.shipId), String(msg?.toIsland));
+        await this.market.flush();
+        this.pushBalances(); // the ship (and its hold) leaves this port's view
+      } catch (e) {
+        client.send("error", { message: errMsg(e) });
+      }
+    });
+
     // The client requests its initial snapshot once it has attached handlers,
     // which avoids racing the onJoin send against the client's listener setup.
     this.onMessage("sync", (client) => this.sendHello(client));
@@ -227,6 +262,7 @@ export class MarketRoom extends Room<MarketState> {
       stallCost: STALL_COST,
       flags: FLAGS,
       conquestCost: CONQUEST_COST,
+      shipCargo: SHIP_CARGO, // cargo capacity per ship class (for the load/sail UI)
     });
     this.sendBalances(client);
   }
