@@ -18,8 +18,10 @@ function expectClean(ex, label) {
 
 test("full loop: buy at A, load, sail to B, unload, sell at B — goods are physical", () => {
   const ex = new Exchange();
-  const A = new Market("A", { exchange: ex, now: () => 1 });
-  const B = new Market("B", { exchange: ex, now: () => 1 });
+  let clock = 1;
+  const now = () => clock;
+  const A = new Market("A", { exchange: ex, now });
+  const B = new Market("B", { exchange: ex, now });
   A.seedLiquidity();
   B.seedLiquidity();
   A.join("cap"); // purse + starter goods in wh:cap:A + a sloop docked at A
@@ -38,8 +40,14 @@ test("full loop: buy at A, load, sail to B, unload, sell at B — goods are phys
   // can't unload at B before the ship arrives
   assert.throws(() => B.unloadCargo("cap", ship.id, "rum", 10), /not docked here/);
 
-  // sail A -> B (instant stub); the hold travels with the ship
-  A.moveShip("cap", ship.id, "B");
+  // set sail A -> B (danger 0 = safe passage); the ship is now AT SEA, not at B yet
+  const { arriveAt } = A.moveShip("cap", ship.id, "B", 5, 0);
+  assert.equal(A.balancesOf("cap").ships[0].dockedAt, null, "at sea, no longer docked at A");
+  assert.throws(() => B.unloadCargo("cap", ship.id, "rum", 10), /not docked here/);
+
+  // time passes; the voyage lands the ship at B (hold rode along)
+  clock = arriveAt;
+  A.tickVoyages();
   assert.equal(B.balancesOf("cap").ships[0].dockedAt, "B");
   assert.equal(B.balancesOf("cap").ships[0].hold.rum, 10, "hold rode along to B");
 
@@ -130,7 +138,7 @@ test("invariant fuzz: random ops across islands/players never break conservation
         }
         case "move": {
           const sh = pick(rnd, m.balancesOf(p).ships);
-          if (sh) m.moveShip(p, sh.id, pick(rnd, islands));
+          if (sh) m.moveShip(p, sh.id, pick(rnd, islands), 1 + ((rnd() * 3) | 0), 0.1); // dist 1-3, danger 0.1
           break;
         }
         case "pledge": m.pledge(p, pick(rnd, ["wardens", "gulls"])); break;
@@ -155,6 +163,7 @@ test("invariant fuzz: random ops across islands/players never break conservation
       // invalid for the current state (insufficient funds/goods, not docked, etc.)
       // — expected and fine; the invariants must still hold either way.
     }
+    m.tickVoyages(); // land any due voyages (rolls transit encounters: damage / sinking)
     expectClean(ex, `after op #${i} (${op})`);
   }
 });

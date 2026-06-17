@@ -25,6 +25,9 @@ export const FINISHED: Set<string>;
 export const SHIP_HULL: Record<string, number>;
 export const REPAIR_PER_HULL: number;
 export const SHIP_PRICE: Record<string, number>;
+export const SHIP_SAIL: Record<string, number>;
+export const TRAVEL_MS_PER_DIST: number;
+export function voyageEncounter(shipId: string, departAt: number, danger: number, hull: number, maxHull: number): { hit: boolean; sunk: boolean; hull: number; dmg: number };
 export const CROWN: string;
 export const SINK_BURN_BPS: number;
 export const LISTING_FEE_BPS: number;
@@ -58,7 +61,8 @@ export type Intent =
   | { seq: number; kind: "cancel"; ref: number }
   | { seq: number; kind: "load"; owner: string; ship: string; commodity: string; qty: number; island: string }
   | { seq: number; kind: "unload"; owner: string; ship: string; commodity: string; qty: number; island: string }
-  | { seq: number; kind: "move"; owner: string; ship: string; to: string }
+  | { seq: number; kind: "sail"; owner: string; ship: string; to: string; from: string; departAt: number; arriveAt: number; danger: number }
+  | { seq: number; kind: "arrive"; ship: string; to: string; hull: number; sunk: boolean }
   | { seq: number; kind: "build"; owner: string; island: string; recipe: string; to: string }
   | { seq: number; kind: "produce"; owner: string; island: string; recipe: string; ts: number }
   | { seq: number; kind: "site"; owner: string; island: string; commodity: string; to: string }
@@ -113,7 +117,8 @@ export interface RestingOrder {
 export interface ShipBalance {
   id: string;
   cls: string;
-  dockedAt: string;
+  dockedAt: string | null; // null while at sea
+  voyage: { from: string; to: string; arriveAt: number } | null;
   cargoCap: number;
   hull: number;
   maxHull: number;
@@ -168,7 +173,8 @@ export class Market {
 
   loadCargo(playerId: string, shipId: string, commodity: string, qty: number): void;
   unloadCargo(playerId: string, shipId: string, commodity: string, qty: number): void;
-  moveShip(playerId: string, shipId: string, toIsland: string): void;
+  moveShip(playerId: string, shipId: string, toIsland: string, dist?: number, danger?: number): { arriveAt: number };
+  tickVoyages(now?: number): Array<{ ship: string; to: string; sunk: boolean; hit: boolean }>;
   tickUpkeep(now?: number): string[];                 // charge due rent; returns owners charged
   repairShip(playerId: string, shipId: string): number; // repair at port; returns PoE charged
   resolveShip(shipId: string, finalHull: number): void; // persist a battle outcome (sink if <=0)

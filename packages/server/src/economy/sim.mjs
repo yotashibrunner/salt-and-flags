@@ -63,40 +63,44 @@ function stepProducer(a, ctx) {
   }
 }
 
-// Trader: a four-phase loop — buy rum cheap at home, sail to the demanding reach,
-// sell it into demand (burned), sail home. Profits on the produce/demand price gap,
-// minus fees + tax + upkeep; feeds the demand sink.
+const ROUTE_DIST = 4;     // lane length harbor <-> reach
+const ROUTE_DANGER = 0.03; // modest transit risk: mostly damage, the occasional sinking
+
+// Trader: arbitrage harbor <-> reach, driven by where the ship actually IS. Buy rum at
+// harbor, sail (now a real voyage — the ship is at sea until it lands), sell into demand
+// at reach, sail home. If the ship is sunk in transit, buy a replacement and carry on.
 function stepTrader(a, ctx) {
-  const m = ctx.markets[a.loc];
-  const bal = m.balancesOf(a.id);
-  const ship = bal.ships.find((s) => s.id === a.shipId);
-  if (!ship) return; // (no sinking in this sim)
-  switch (a.phase) {
-    case "buy": {
-      const ask = m.depth("rum").asks[0];
-      if (ask && bal.poe > ask.price * 6) { try { m.placeLimit(a.id, "rum", "buy", ask.price, 5); } catch {} }
-      const have = m.balancesOf(a.id).holdings.rum || 0;
-      if (have > 0) { try { m.loadCargo(a.id, a.shipId, "rum", Math.min(have, ship.cargoCap)); a.phase = "sail"; } catch {} }
-      break;
+  const ship = ctx.markets[HOME].balancesOf(a.id).ships[0]; // the fleet view is global
+  if (!ship) { // sunk: replace it at the last port if we can afford one
+    try { ctx.markets[a.loc].buyShip(a.id, "sloop"); } catch {}
+    return;
+  }
+  if (ship.voyage) return; // at sea — wait for arrival (tickVoyages lands it)
+  const here = ship.dockedAt;
+  a.loc = here;
+  const m = ctx.markets[here];
+
+  if (here === HOME) {
+    // buy rum cheap, load it, set sail for the demanding reach
+    const ask = m.depth("rum").asks[0];
+    const bal = m.balancesOf(a.id);
+    if (ask && bal.poe > ask.price * 6) { try { m.placeLimit(a.id, "rum", "buy", ask.price, 5); } catch {} }
+    const have = m.balancesOf(a.id).holdings.rum || 0;
+    if (have > 0) {
+      try { m.loadCargo(a.id, ship.id, "rum", Math.min(have, ship.cargoCap)); } catch {}
+      try { m.moveShip(a.id, ship.id, MARKET, ROUTE_DIST, ROUTE_DANGER); } catch {}
     }
-    case "sail":
-      try { m.moveShip(a.id, a.shipId, MARKET); a.loc = MARKET; a.phase = "sell"; } catch {}
-      break;
-    case "sell": {
-      const held = m.balancesOf(a.id).ships.find((s) => s.id === a.shipId);
-      const inHold = held ? (held.hold.rum || 0) : 0;
-      if (inHold > 0) { try { m.unloadCargo(a.id, a.shipId, "rum", inHold); } catch {} }
-      const have = m.balancesOf(a.id).holdings.rum || 0;
-      if (have > 0) {
-        const bid = m.depth("rum").bids[0];
-        if (bid) { try { m.placeLimit(a.id, "rum", "sell", bid.price, have); } catch {} }
-      }
-      a.phase = "return";
-      break;
+  } else if (here === MARKET) {
+    // unload + sell into demand (burned), then sail home
+    const held = m.balancesOf(a.id).ships[0];
+    const inHold = held ? (held.hold.rum || 0) : 0;
+    if (inHold > 0) { try { m.unloadCargo(a.id, ship.id, "rum", inHold); } catch {} }
+    const have = m.balancesOf(a.id).holdings.rum || 0;
+    if (have > 0) {
+      const bid = m.depth("rum").bids[0];
+      if (bid) { try { m.placeLimit(a.id, "rum", "sell", bid.price, have); } catch {} }
     }
-    case "return":
-      try { m.moveShip(a.id, a.shipId, HOME); a.loc = HOME; a.phase = "buy"; } catch {}
-      break;
+    try { m.moveShip(a.id, ship.id, HOME, ROUTE_DIST, ROUTE_DANGER); } catch {}
   }
 }
 
@@ -148,6 +152,7 @@ export function runSim(opts = {}) {
         catch { /* an agent's action was invalid for the current state — skip */ }
       }
       markets[MARKET].restockDemand(); // keep a standing buyer so trade doesn't deadlock
+      markets[HOME].tickVoyages();     // land arrivals (rolls transit encounters: damage / sinking)
     }
     // end-of-epoch upkeep (recurring rent — the deflationary pressure)
     for (const id of Object.keys(markets)) markets[id].tickUpkeep();

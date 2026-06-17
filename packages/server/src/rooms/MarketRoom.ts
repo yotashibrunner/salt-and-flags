@@ -19,7 +19,7 @@ import { Schema, type, MapSchema, ArraySchema } from "@colyseus/schema";
 import type { Market } from "../economy/market.mjs";
 import { STALL_COST, CONQUEST_COST, FLAGS, SHIP_CARGO, SHIP_PRICE } from "../economy/market.mjs";
 import { getHub } from "../economy/hub.js";
-import { getIsland } from "../world/registry.js";
+import { getIsland, laneDist, islandDanger } from "../world/registry.js";
 
 class LevelState extends Schema {
   @type("number") price = 0;
@@ -220,9 +220,13 @@ export class MarketRoom extends Room<MarketState> {
 
     this.onMessage<MoveMsg>("move", async (client, msg) => {
       try {
-        this.market.moveShip(this.pid(client), String(msg?.shipId), String(msg?.toIsland));
+        const to = String(msg?.toIsland);
+        const dist = laneDist(this.state.island, to);
+        if (dist === undefined) throw new Error(`no sea lane from here to ${to}`);
+        const danger = Math.max(islandDanger(this.state.island), islandDanger(to));
+        this.market.moveShip(this.pid(client), String(msg?.shipId), to, dist, danger);
         await this.market.flush();
-        this.pushBalances(); // the ship (and its hold) leaves this port's view
+        this.pushBalances(); // the ship is now at sea — it leaves this port's view
       } catch (e) {
         client.send("error", { message: errMsg(e) });
       }
@@ -235,7 +239,9 @@ export class MarketRoom extends Room<MarketState> {
     // Labor regenerates over time; push fresh (server-computed) balances on a tick
     // so clients see it climb without ever computing a balance themselves. Also
     // refresh the flag treasury (it can grow from builds on its other islands).
-    this.clock.setInterval(() => {
+    this.clock.setInterval(async () => {
+      const arrived = this.market.tickVoyages(); // land due voyages (rolls transit encounters)
+      if (arrived.length) await this.market.flush();
       this.pushBalances();
       this.syncFlag();
     }, 2000);

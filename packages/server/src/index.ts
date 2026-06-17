@@ -8,7 +8,7 @@ import colyseusPkg from "colyseus";
 const { Server } = colyseusPkg;
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { generateWorld } from "./world/worldgen.js";
-import { setIslands } from "./world/registry.js";
+import { setWorld } from "./world/registry.js";
 import { PillageRoom } from "./rooms/PillageRoom.js";
 import { MarketRoom } from "./rooms/MarketRoom.js";
 import { MarketHub, setHub } from "./economy/hub.js";
@@ -20,7 +20,7 @@ const SEED = Number(process.env.WORLD_SEED ?? 18327);
 
 // Generate the big map once at boot and cache it.
 const world = generateWorld(SEED);
-setIslands(world.islands); // index islands so MarketRoom can validate + price per-island
+setWorld(world); // index islands + the lane graph so MarketRoom can validate, price, and route voyages
 console.log(`world ${SEED}: ${world.islands.length} islands, ${world.lanes.length} lanes, ${world.regions.length} regions`);
 
 // One shared market engine for the whole server. Persisted to Postgres when a DB

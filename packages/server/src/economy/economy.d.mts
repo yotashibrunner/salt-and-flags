@@ -48,7 +48,8 @@ export class Ledger {
   sum(): number;
 }
 
-export interface ShipRec { owner: string; cls: string; dockedAt: string; hull: number; maxHull: number; }
+export interface Voyage { from: string; to: string; departAt: number; arriveAt: number; danger: number; }
+export interface ShipRec { owner: string; cls: string; dockedAt: string | null; hull: number; maxHull: number; voyage: Voyage | null; }
 
 export class Exchange {
   accounts: Map<string, Account>;

@@ -337,6 +337,26 @@ export const SHIP_CARGO = { sloop: 60, brig: 140, frigate: 220, galleon: 400 }; 
 export const SHIP_HULL = { sloop: 16, brig: 28, frigate: 44, galleon: 70 };      // mirrors @salt/shared SHIP_CLASSES.hull
 export const REPAIR_PER_HULL = 4; // PoE per hull point to repair at a port (a SINK)
 export const SHIP_PRICE = { sloop: 300, brig: 900, frigate: 1800, galleon: 3600 }; // shipyard purchase price (a SINK)
+export const SHIP_SAIL = { sloop: 10, brig: 14, frigate: 18, galleon: 16 }; // mirrors @salt/shared SHIP_CLASSES.sail
+export const TRAVEL_MS_PER_DIST = 600; // voyage ms per lane-distance unit, before the ship's sail divides it
+
+// Deterministic transit encounter for a voyage. Pure (no RNG state) — the roll is a
+// hash of (shipId, departAt), so it reproduces on replay and in tests, while the OUTCOME
+// is also recorded on the `arrive` intent for robustness. A hit does 20%..60% of max
+// hull in damage; a ship already low enough is sunk. `danger` is the route's risk (0..1).
+function hash32(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+export function voyageEncounter(shipId, departAt, danger, hull, maxHull) {
+  const h = hash32(`${shipId}:${departAt}`);
+  if ((h % 10000) / 10000 >= (danger || 0)) return { hit: false, sunk: false, hull, dmg: 0 };
+  const sev = ((h >>> 13) % 1000) / 1000; // 0..1
+  const dmg = Math.max(1, Math.ceil(maxHull * (0.2 + 0.4 * sev)));
+  const nh = hull - dmg;
+  return { hit: true, sunk: nh <= 0, hull: Math.max(0, nh), dmg };
+}
 function holdId(shipId) { return `hold:${shipId}`; }
 function shipCargoCap(cls) { return SHIP_CARGO[cls] ?? 0; }
 function holdFill(ex, shipId) {
@@ -354,7 +374,7 @@ function getShip(ex, shipId, owner) {
 function applyCreateShip(ex, shipId, owner, cls, dockedAt) {
   if (!ex.ships) ex.ships = new Map();
   const maxHull = SHIP_HULL[cls] ?? 0;
-  ex.ships.set(shipId, { owner, cls, dockedAt, hull: maxHull, maxHull });
+  ex.ships.set(shipId, { owner, cls, dockedAt, hull: maxHull, maxHull, voyage: null });
   const n = Number(String(shipId).replace(/^s/, "")); // keep the live counter ahead on replay
   if (Number.isFinite(n)) ex._sid = Math.max(ex._sid || 0, n);
 }
@@ -390,10 +410,22 @@ function applyUnload(ex, owner, shipId, commodity, qty, island) {
   const w = ex._inv(ex.whId(owner, island));
   w.inv[commodity] = (w.inv[commodity] || 0) + qty;
 }
-function applyMove(ex, owner, shipId, toIsland) {
-  if (!toIsland) throw new Error("choose a destination");
+// Begin a voyage: the ship leaves port (dockedAt -> null) and is at sea until arriveAt.
+// Used live AND on replay (the timing + route ride on the `sail` intent).
+function applySail(ex, owner, shipId, toIsland, from, departAt, arriveAt, danger) {
   const s = getShip(ex, shipId, owner);
-  s.dockedAt = toIsland; // instant stub: wind/encounters/travel-time are a later slice
+  s.dockedAt = null;
+  s.voyage = { from, to: toIsland, departAt, arriveAt, danger };
+}
+// Complete a voyage: sink it (loss-on-sinking) or dock it at the destination with its
+// post-encounter hull. Used live AND on replay (outcome recorded on the `arrive` intent).
+function applyArrive(ex, shipId, to, hull, sunk) {
+  if (sunk) { applyScuttle(ex, shipId); return; }
+  const s = ex.ships && ex.ships.get(shipId);
+  if (!s) return;
+  s.dockedAt = to;
+  s.voyage = null;
+  s.hull = Math.max(0, Math.min(s.maxHull, hull));
 }
 // Set a ship's hull (clamped). Used to persist a battle's damage outcome on replay.
 function applySetHull(ex, shipId, hull) {
@@ -586,9 +618,40 @@ export class Market {
     applyUnload(this.ex, playerId, shipId, commodity, qty, this.island);
     if (this.store) this._record({ kind: "unload", owner: playerId, ship: shipId, commodity, qty, island: this.island });
   }
-  moveShip(playerId, shipId, toIsland) {
-    applyMove(this.ex, playerId, shipId, toIsland);
-    if (this.store) this._record({ kind: "move", owner: playerId, ship: shipId, to: toIsland });
+  // Set sail for `toIsland` along a lane of length `dist` through risk `danger`. The
+  // ship goes to sea (can't load/unload/trade) for a duration set by the lane distance
+  // and the ship's sail speed, then arrives via tickVoyages. Recorded as a `sail` intent.
+  moveShip(playerId, shipId, toIsland, dist = 1, danger = 0) {
+    const s = this.ex.ships.get(shipId);
+    if (!s) throw new Error(`no such ship: ${shipId}`);
+    if (s.owner !== playerId) throw new Error("not your ship");
+    if (s.voyage) throw new Error("ship is already at sea");
+    if (s.dockedAt !== this.island) throw new Error("your ship is not docked here");
+    if (!toIsland || toIsland === this.island) throw new Error("choose a destination");
+    const departAt = this._now();
+    const duration = Math.max(1000, Math.round((dist || 1) * TRAVEL_MS_PER_DIST / (SHIP_SAIL[s.cls] || 10)));
+    const arriveAt = departAt + duration;
+    applySail(this.ex, playerId, shipId, toIsland, this.island, departAt, arriveAt, danger);
+    if (this.store) this._record({ kind: "sail", owner: playerId, ship: shipId, to: toIsland, from: this.island, departAt, arriveAt, danger });
+    return { arriveAt };
+  }
+
+  // Land every ship whose voyage is due by `now`: roll its transit encounter (damage or
+  // a sinking) and dock it (or scuttle it). Recorded as `arrive` intents (the outcome is
+  // stored, so a restart applies it verbatim). Returns the arrivals (for the room/sim).
+  tickVoyages(now = this._now()) {
+    const due = [];
+    for (const [id, s] of this.ex.ships) if (s.voyage && now >= s.voyage.arriveAt) due.push(id);
+    const arrived = [];
+    for (const id of due) {
+      const s = this.ex.ships.get(id);
+      const r = voyageEncounter(id, s.voyage.departAt, s.voyage.danger, s.hull, s.maxHull);
+      const to = s.voyage.to;
+      applyArrive(this.ex, id, to, r.hull, r.sunk);
+      if (this.store) this._record({ kind: "arrive", ship: id, to, hull: r.hull, sunk: r.sunk });
+      arrived.push({ ship: id, to, sunk: r.sunk, hit: r.hit });
+    }
+    return arrived;
   }
 
   // --- sinks: upkeep (recurring rent), repair, and battle outcomes (hull/sink) ---
@@ -867,7 +930,8 @@ export class Market {
       const h = this.ex.accounts.get(`hold:${id}`);
       const hold = {};
       if (h) for (const c of this.commodities) if (h.inv[c]) hold[c] = h.inv[c];
-      ships.push({ id, cls: s.cls, dockedAt: s.dockedAt, cargoCap: SHIP_CARGO[s.cls] ?? 0, hull: s.hull, maxHull: s.maxHull, hold });
+      const voyage = s.voyage ? { from: s.voyage.from, to: s.voyage.to, arriveAt: s.voyage.arriveAt } : null;
+      ships.push({ id, cls: s.cls, dockedAt: s.dockedAt, voyage, cargoCap: SHIP_CARGO[s.cls] ?? 0, hull: s.hull, maxHull: s.maxHull, hold });
     }
     return { poe: a.poe, labor: laborAt(this.ex, playerId, now), holdings, orders, stalls, sites, ships, pledged: this.isPledged(playerId), myFlags: this.flagsOf(playerId) };
   }
@@ -916,7 +980,8 @@ export function replay(ex, intents) {
     else if (it.kind === "cancel") ex.cancel(it.ref);
     else if (it.kind === "load") applyLoad(ex, it.owner, it.ship, it.commodity, it.qty, it.island);
     else if (it.kind === "unload") applyUnload(ex, it.owner, it.ship, it.commodity, it.qty, it.island);
-    else if (it.kind === "move") applyMove(ex, it.owner, it.ship, it.to);
+    else if (it.kind === "sail") applySail(ex, it.owner, it.ship, it.to, it.from, it.departAt, it.arriveAt, it.danger);
+    else if (it.kind === "arrive") applyArrive(ex, it.ship, it.to, it.hull, it.sunk);
     else if (it.kind === "build") applyBuild(ex, it.owner, it.island, it.recipe, it.to ?? UNCLAIMED_TREASURY);
     else if (it.kind === "site") applyBuildSite(ex, it.owner, it.island, it.commodity, it.to ?? UNCLAIMED_TREASURY);
     else if (it.kind === "extract") applyExtract(ex, it.owner, it.island, it.commodity, it.fee ?? EXTRACT_FEE, it.flag ?? null, it.ts ?? 0);

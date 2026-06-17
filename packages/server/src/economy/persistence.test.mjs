@@ -169,7 +169,7 @@ test("a fresh log replays to an empty (but valid) exchange", () => {
 test("LOCATED state survives a restart: ships at different ports, partial holds, and per-island warehouses all rebuild IDENTICALLY", async () => {
   const store = new MemStore();
   let seq = 0; const nextSeq = () => ++seq;
-  const now = () => 5_000_000; // frozen clock so labor + produce replay deterministically
+  let clock = 5_000_000; const now = () => clock; // advanced to land voyages; replay uses recorded ts
 
   // --- live session: three islands sharing one engine, three captains ---
   const ex1 = new Exchange();
@@ -187,16 +187,19 @@ test("LOCATED state survives a restart: ships at different ports, partial holds,
   const s2 = isleB.balancesOf("p2").ships[0].id;
   const s3 = isleA.balancesOf("p3").ships[0].id;
 
-  // p1: partially load at A, SAIL to C, partially unload there (hold stays partial)
+  // p1: partially load at A, SAIL to C (safe passage, danger 0), let the voyage land,
+  // then partially unload there (hold stays partial)
   isleA.loadCargo("p1", s1, "rum", 7); await isleA.flush();
   isleA.loadCargo("p1", s1, "iron", 3); await isleA.flush();
-  isleA.moveShip("p1", s1, "isleC"); await isleA.flush();
-  isleC.unloadCargo("p1", s1, "rum", 2); await isleC.flush();   // wh:p1:isleC gets 2 rum
+  const v1 = isleA.moveShip("p1", s1, "isleC", 5, 0); await isleA.flush();
+  clock = v1.arriveAt; isleA.tickVoyages(); await isleA.flush(); // s1 arrives at isleC
+  isleC.unloadCargo("p1", s1, "rum", 2); await isleC.flush();    // wh:p1:isleC gets 2 rum
 
-  // p2: load at B, sail to A, unload SOME (hold keeps a remainder)
+  // p2: load at B, sail to A, land, unload SOME (hold keeps a remainder)
   isleB.loadCargo("p2", s2, "cloth", 5); await isleB.flush();
-  isleB.moveShip("p2", s2, "isleA"); await isleB.flush();
-  isleA.unloadCargo("p2", s2, "cloth", 3); await isleA.flush(); // hold keeps cloth 2
+  const v2 = isleB.moveShip("p2", s2, "isleA", 5, 0); await isleB.flush();
+  clock = v2.arriveAt; isleB.tickVoyages(); await isleB.flush(); // s2 arrives at isleA
+  isleA.unloadCargo("p2", s2, "cloth", 3); await isleA.flush();  // hold keeps cloth 2
 
   // p3: a taxed sale + located production, then load a little and stay docked at A
   const bid = isleA.depth("rum").bids[0].price;
