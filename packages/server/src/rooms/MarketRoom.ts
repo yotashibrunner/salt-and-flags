@@ -40,6 +40,9 @@ class MarketState extends Schema {
   @type("number") taxRate = 0;            // commerce tax rate on this island's trades
   @type("number") flagTreasury = 0;       // PoE the controlling flag has collected
   @type("number") flagMembers = 0;        // players pledged to the controlling flag
+  @type("number") blockadeMeter = -1;     // contested-control meter (0..100), -1 if no blockade
+  @type("string") blockadeAttacker = "";  // flag attempting the takeover
+  @type("string") blockadeDefender = "";  // flag defending (controller); "" if unclaimed
   @type(["string"]) commodities = new ArraySchema<string>();
   @type(["string"]) produces = new ArraySchema<string>();
   @type(["string"]) demands = new ArraySchema<string>();
@@ -77,6 +80,7 @@ export class MarketRoom extends Room<MarketState> {
     this.state.taxRate = info.taxRate;
     this.state.flagTreasury = this.market.flagTreasury();
     this.state.flagMembers = this.market.flagMemberCount();
+    this.syncBlockade();
     for (const c of info.produces) this.state.produces.push(c);
     for (const c of info.demands) this.state.demands.push(c);
     for (const c of this.market.commodities) {
@@ -225,6 +229,20 @@ export class MarketRoom extends Room<MarketState> {
       catch (e) { client.send("error", { message: errMsg(e) }); }
     });
 
+    // --- blockades: a contested, labor-driven takeover of this island ---
+    this.onMessage<SeizeMsg>("blockade:declare", async (client, msg) => {
+      try { this.market.declareBlockade(this.pid(client), String(msg?.flag)); await this.market.flush(); this.syncBlockade(); this.pushBalances(); }
+      catch (e) { client.send("error", { message: errMsg(e) }); }
+    });
+    this.onMessage("blockade:push", async (client) => {
+      try { this.market.pushBlockade(this.pid(client)); await this.market.flush(); this.syncBlockade(); this.syncFlag(); this.pushBalances(); }
+      catch (e) { client.send("error", { message: errMsg(e) }); }
+    });
+    this.onMessage("blockade:defend", async (client) => {
+      try { this.market.defendBlockade(this.pid(client)); await this.market.flush(); this.syncBlockade(); this.pushBalances(); }
+      catch (e) { client.send("error", { message: errMsg(e) }); }
+    });
+
     // Go hunting: if the captain has a ship docked here, hand back the config to open a
     // PillageRoom (which spawns an NPC raider and persists the outcome via the hub).
     this.onMessage("raid", (client) => {
@@ -345,9 +363,16 @@ export class MarketRoom extends Room<MarketState> {
   }
 
   private syncFlag() {
-    this.state.flag = this.market.flag ?? ""; // conquest can change the controller
+    this.state.flag = this.market.flag ?? ""; // conquest/blockade can change the controller
     this.state.flagTreasury = this.market.flagTreasury();
     this.state.flagMembers = this.market.flagMemberCount();
+  }
+
+  private syncBlockade() {
+    const b = this.market.blockadeHere();
+    this.state.blockadeMeter = b ? b.meter : -1;
+    this.state.blockadeAttacker = b?.attacker ?? "";
+    this.state.blockadeDefender = b?.defender ?? "";
   }
 
   private sendHello(client: Client) {

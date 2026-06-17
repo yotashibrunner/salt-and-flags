@@ -65,6 +65,7 @@ export class Exchange {
   sites?: Map<string, { owner: string; island: string; commodity: string }>; // extraction sites
   crews?: Map<string, { name: string; captain: string; members: Set<string> }>; // player crews
   _cid?: number; // crew-id counter
+  blockades?: Map<string, { attacker: string; defender: string | null; meter: number }>; // contested islands
   onboarded?: Set<string>; // players who have received their one-time starter ship + goods
 
   createAccount(id: string, poe?: number, inv?: Record<string, number>): Account;

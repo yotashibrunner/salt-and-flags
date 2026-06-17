@@ -39,7 +39,7 @@ const poeEl = $("poe"), laborEl = $("labor"), holdingsEl = $("holdings"), myorde
 const stallsEl = $("stalls"), flagPanelEl = $("flagpanel");
 const fleetEl = $("fleet"), shipyardEl = $("shipyard"), sitesEl = $("sites"), salvageEl = $("salvage");
 const raidBtn = $("raid") as HTMLButtonElement;
-const crewsEl = $("crews");
+const crewsEl = $("crews"), blockadeEl = $("blockade");
 const crewNameEl = $("crewname") as HTMLInputElement, crewJoinIdEl = $("crewjoinid") as HTMLInputElement, crewAmtEl = $("crewamt") as HTMLInputElement;
 
 const client = new Client(SERVER);
@@ -100,6 +100,7 @@ function renderFlag() {
 
 function renderBook() {
   renderFlag();
+  renderBlockade();
   const book = room?.state?.books?.get(selected);
   lastEl.textContent = book && book.last ? String(book.last) : "—";
   const bids: Level[] = book ? [...book.bids].map((l: any) => ({ price: l.price, qty: l.qty })) : [];
@@ -199,6 +200,29 @@ function renderSalvage() {
   }
 }
 
+function renderBlockade() {
+  const meter = room?.state?.blockadeMeter ?? -1;
+  if (meter >= 0) {
+    const att = room!.state.blockadeAttacker as string;
+    const def = (room!.state.blockadeDefender as string) || "unclaimed";
+    const canPush = balances.myFlags.includes(att);
+    const canDefend = room!.state.blockadeDefender && balances.myFlags.includes(room!.state.blockadeDefender);
+    blockadeEl.innerHTML = `<span>⚔ <b>${att}</b> vs <b>${def}</b> — control <b>${meter}</b>/100</span>
+      ${canPush ? `<button class="sell" id="bpush">Push ↑ (labor)</button>` : ""}
+      ${canDefend ? `<button class="buy" id="bdefend">Defend ↓ (labor)</button>` : ""}`;
+    const pu = document.getElementById("bpush"); if (pu) (pu as HTMLButtonElement).onclick = () => room?.send("blockade:push");
+    const de = document.getElementById("bdefend"); if (de) (de as HTMLButtonElement).onclick = () => room?.send("blockade:defend");
+  } else {
+    const controller = (room?.state?.flag as string) ?? "";
+    const mine = balances.myFlags.filter((f) => f !== controller);
+    blockadeEl.innerHTML = mine.length
+      ? `<span>Declare a blockade for:</span><select id="bflag">${mine.map((f) => `<option>${f}</option>`).join("")}</select><button class="sell" id="bdeclare">Declare blockade</button>`
+      : `<span style="color:#6f8a93">Pledge to a flag that doesn't already hold this island to declare a blockade.</span>`;
+    const dc = document.getElementById("bdeclare");
+    if (dc) (dc as HTMLButtonElement).onclick = () => room?.send("blockade:declare", { flag: (document.getElementById("bflag") as HTMLSelectElement)?.value });
+  }
+}
+
 function renderCrews() {
   const crews = balances.crews ?? [];
   crewsEl.innerHTML = crews.length ? crews.map((c) => `
@@ -224,6 +248,7 @@ function renderBalances() {
   renderFleet();  // ships/cargo/voyages + shipyard
   renderSalvage();
   renderCrews();
+  renderBlockade();
   renderFlag();   // pledged status / payout button depends on balances
   holdingsEl.innerHTML = commodities
     .map((c) => `<div>${c}</div><div style="text-align:right">${balances.holdings[c] ?? 0}</div>`)
