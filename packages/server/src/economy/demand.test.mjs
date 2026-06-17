@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Exchange } from "./economy.mjs";
-import { Market, replay, DEMAND, DEMAND_CAP } from "./market.mjs";
+import { Market, replay, DEMAND, DEMAND_CAP, CROWN } from "./market.mjs";
 import { checkAll } from "./invariants.mjs";
 
 // In-memory Store double (same shape PgStore implements).
@@ -57,6 +57,21 @@ test("demand is bounded by the cap, and refills on restock", () => {
 
   // a no-op restock (already full) records/returns nothing
   assert.deepEqual(m.restockDemand(), []);
+  assert.equal(checkAll(m.ex), null);
+});
+
+test("a demand levy skims demand sales as a sink (split crown/flag) — drains the premium", () => {
+  const m = new Market("isleB", { demands: ["rum"], flag: "wardens", demandLevyBps: 2500, now: () => 1 }); // 25%
+  m.join("p1");
+  const px = m.seedPrice("rum");
+  const before = m.balancesOf("p1").poe;
+  m.placeLimit("p1", "rum", "sell", px, 8); // sells into the demand bid (burned)
+
+  const proceeds = px * 8;
+  const levy = Math.floor(proceeds * 0.25);
+  assert.equal(m.balancesOf("p1").poe, before + proceeds - levy, "seller kept proceeds minus the demand levy");
+  assert.equal(m.ex.poeOf(CROWN), Math.floor(levy * 0.6), "60% of the levy burned to crown");
+  assert.equal(m.ex.poeOf("wardens"), levy - Math.floor(levy * 0.6), "40% to the controlling flag");
   assert.equal(checkAll(m.ex), null);
 });
 

@@ -9,7 +9,7 @@
 // tells us). A module singleton (set in index.ts) lets each MarketRoom reach it.
 // ============================================================================
 import { Exchange } from "./economy.mjs";
-import { Market, replay, seededIslandsFrom, LISTING_FEE_BPS } from "./market.mjs";
+import { Market, replay, seededIslandsFrom, LISTING_FEE_BPS, DEMAND_LEVY_BPS } from "./market.mjs";
 import type { Store } from "./market.mjs";
 import type { IslandInfo } from "../world/registry.js";
 
@@ -74,6 +74,7 @@ export class MarketHub {
       flag: info.controllingFlag,
       taxRate: info.taxRate,
       listingFeeBps: LISTING_FEE_BPS, // the live economy charges a listing fee (a sink)
+      demandLevyBps: DEMAND_LEVY_BPS, // and skims the demand premium (a sink)
       nextSeq: () => ++this.seq,
     });
     this.markets.set(info.id, m);

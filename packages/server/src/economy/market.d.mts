@@ -20,6 +20,7 @@ export const SHIP_CARGO: Record<string, number>;
 export const DEMAND: string;
 export const DEMAND_RESERVE: number;
 export const DEMAND_CAP: number;
+export const DEMAND_LEVY_BPS: number;
 export const FINISHED: Set<string>;
 export const SHIP_HULL: Record<string, number>;
 export const REPAIR_PER_HULL: number;
@@ -51,7 +52,7 @@ export type Intent =
   | { seq: number; kind: "account"; owner: string; poe: number; ts: number }
   | { seq: number; kind: "grant"; owner: string; island: string; inv: Record<string, number> }
   | { seq: number; kind: "ship"; id: string; owner: string; cls: string; dockedAt: string }
-  | { seq: number; kind: "place"; owner: string; island: string; commodity: string; side: Side; price: number; qty: number; flag: string | null; rate: number; fee: number }
+  | { seq: number; kind: "place"; owner: string; island: string; commodity: string; side: Side; price: number; qty: number; flag: string | null; rate: number; fee: number; levy: number }
   | { seq: number; kind: "cancel"; ref: number }
   | { seq: number; kind: "load"; owner: string; ship: string; commodity: string; qty: number; island: string }
   | { seq: number; kind: "unload"; owner: string; ship: string; commodity: string; qty: number; island: string }
@@ -90,6 +91,7 @@ export interface MarketOptions {
   flag?: string | null;       // island's controlling flag (levy + tax destination)
   taxRate?: number;           // commerce tax skimmed from sellers (0 = none)
   listingFeeBps?: number;     // fee on placing an order, in basis points (0 = none)
+  demandLevyBps?: number;     // sink skimmed from demand sales, in basis points (0 = none)
   seedLevels?: number;
   seedQty?: number;
   exchange?: Exchange;        // shared engine (hub); omit for a standalone market

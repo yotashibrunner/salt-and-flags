@@ -11,7 +11,7 @@
 // ============================================================================
 import { pathToFileURL } from "node:url";
 import { Exchange } from "./economy.mjs";
-import { Market, FLAGS, LISTING_FEE_BPS, EXTRACT_FEE } from "./market.mjs";
+import { Market, FLAGS, LISTING_FEE_BPS, DEMAND_LEVY_BPS, EXTRACT_FEE } from "./market.mjs";
 import { checkAll } from "./invariants.mjs";
 
 // A small, legible economy: a producing harbor (cheap sugar + rum) and a flagged
@@ -125,7 +125,7 @@ export function runSim(opts = {}) {
   let seq = 0;
   const markets = {};
   for (const cfg of ISLANDS) {
-    markets[cfg.id] = new Market(cfg.id, { exchange: ex, ...cfg, listingFeeBps: LISTING_FEE_BPS, nextSeq: () => ++seq, now });
+    markets[cfg.id] = new Market(cfg.id, { exchange: ex, ...cfg, listingFeeBps: LISTING_FEE_BPS, demandLevyBps: DEMAND_LEVY_BPS, nextSeq: () => ++seq, now });
     markets[cfg.id].seedLiquidity();
   }
 
