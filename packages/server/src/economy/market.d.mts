@@ -29,6 +29,12 @@ export const LISTING_FEE_BPS: number;
 export const UPKEEP_PERIOD_MS: number;
 export const UPKEEP_STALL: number;
 export const UPKEEP_SHIP: number;
+export const UPKEEP_SITE: number;
+export const RAWS: Set<string>;
+export const SITE_COST: number;
+export const EXTRACT_LABOR: number;
+export const EXTRACT_YIELD: number;
+export const EXTRACT_FEE: number;
 export function isSystemOwner(id: string): boolean;
 
 export interface Recipe {
@@ -52,6 +58,8 @@ export type Intent =
   | { seq: number; kind: "move"; owner: string; ship: string; to: string }
   | { seq: number; kind: "build"; owner: string; island: string; recipe: string; to: string }
   | { seq: number; kind: "produce"; owner: string; island: string; recipe: string; ts: number }
+  | { seq: number; kind: "site"; owner: string; island: string; commodity: string; to: string }
+  | { seq: number; kind: "extract"; owner: string; island: string; commodity: string; fee: number; flag: string | null; ts: number }
   | { seq: number; kind: "pledge"; owner: string; flag: string }
   | { seq: number; kind: "payout"; flag: string }
   | { seq: number; kind: "seize"; owner: string; island: string; flag: string; cost: number }
@@ -114,6 +122,7 @@ export interface Balances {
   holdings: Record<string, number>; // warehouse stock ON THIS ISLAND
   orders: RestingOrder[];
   stalls: string[]; // recipe ids this player owns a stall for on this island
+  sites: string[];  // raw commodities this player owns an extraction site for here
   ships: ShipBalance[]; // the captain's whole fleet + each hold's contents
   pledged: boolean; // pledged to this island's controlling flag?
   myFlags: string[]; // every flag this player is pledged to
@@ -138,6 +147,8 @@ export class Market {
 
   placeLimit(playerId: string, commodity: string, side: Side, price: number, qty: number): Order;
   build(playerId: string, recipeId: string): Stall;
+  buildSite(playerId: string, commodity: string): { owner: string; island: string; commodity: string };
+  extract(playerId: string, commodity: string): void;
   readonly flag: string | null;
   flagTreasury(): number;
   flagMemberCount(): number;

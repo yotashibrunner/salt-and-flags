@@ -11,15 +11,15 @@
 // ============================================================================
 import { pathToFileURL } from "node:url";
 import { Exchange } from "./economy.mjs";
-import { Market, FLAGS, LISTING_FEE_BPS } from "./market.mjs";
+import { Market, FLAGS, LISTING_FEE_BPS, EXTRACT_FEE } from "./market.mjs";
 import { checkAll } from "./invariants.mjs";
 
 // A small, legible economy: a producing harbor (cheap sugar + rum) and a flagged
 // reach that DEMANDS rum (the burn-sink). Traders arbitrage harbor -> reach.
 const ISLANDS = [
-  // harbor grants ample sugar (a stand-in for raw supply until a raw-extraction slice
-  // exists) so producers have feedstock; rum is "produced" here so it seeds cheap.
-  { id: "harbor", produces: ["sugar", "rum"], demands: [], flag: null, taxRate: 0, newPlayerInv: { sugar: 12000 } },
+  // harbor produces sugar (so it can be EXTRACTED here) + rum (seeds cheap). Producers
+  // now pay to extract their own feedstock — no free grant — so raw supply costs money.
+  { id: "harbor", produces: ["sugar", "rum"], demands: [], flag: null, taxRate: 0 },
   { id: "reach", produces: [], demands: ["rum"], flag: "wardens", taxRate: 0.05 },
 ];
 const HOME = "harbor";
@@ -49,7 +49,11 @@ function gini(xs) {
 function stepProducer(a, ctx) {
   const m = ctx.markets[HOME];
   let bal = m.balancesOf(a.id);
+  if (!bal.sites.includes("sugar") && bal.poe > 400) { try { m.buildSite(a.id, "sugar"); } catch {} }
   if (!bal.stalls.includes("distill") && bal.poe > 400) { try { m.build(a.id, "distill"); } catch {} }
+  bal = m.balancesOf(a.id);
+  // extract sugar (pays the fee — the sink) when feedstock is low
+  if ((bal.holdings.sugar || 0) < 3 && bal.poe > EXTRACT_FEE) { try { m.extract(a.id, "sugar"); } catch {} }
   try { m.produce(a.id, "distill"); } catch {} // 3 sugar + labor -> 2 rum
   bal = m.balancesOf(a.id);
   const rum = bal.holdings.rum || 0;

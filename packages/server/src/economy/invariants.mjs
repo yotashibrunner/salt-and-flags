@@ -22,10 +22,10 @@ const TERMINAL_SINKS = new Set([CROWN, "warchest"]); // accounts that only ever 
 // Next slice: assert every system-touching pair's reason is in FAUCET ∪ SINK and
 // that ΔtotalPoe over a window == Σfaucet − Σsink.
 export const FAUCET_REASONS = new Set(["plunder"]);
-export const SINK_REASONS = new Set(["conquest", "upkeep", "fee", "repair"]);
+export const SINK_REASONS = new Set(["conquest", "upkeep", "fee", "repair", "extract"]);
 export const TRANSFER_REASONS = new Set([
   "escrow_buy", "fill", "price_improve_refund", "cancel_refund",
-  "stall_levy", "trade_tax", "flag_payout", "flag_levy",
+  "stall_levy", "trade_tax", "flag_payout", "flag_levy", "site_levy",
 ]);
 // Every PoE movement must carry one of these reasons — the reframe seam: a new
 // faucet/sink (e.g. upkeep, repair, fees) is added by labeling it here, and

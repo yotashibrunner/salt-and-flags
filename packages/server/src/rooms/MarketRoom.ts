@@ -54,6 +54,7 @@ interface PledgeMsg { flag?: string; }
 interface SeizeMsg { flag: string; }
 interface CargoMsg { shipId: string; commodity: string; qty: number; }
 interface MoveMsg { shipId: string; toIsland: string; }
+interface CommodityMsg { commodity: string; }
 
 export class MarketRoom extends Room<MarketState> {
   maxClients = 64;
@@ -155,6 +156,28 @@ export class MarketRoom extends Room<MarketState> {
         this.market.produce(this.pid(client), String(msg?.recipeId));
         await this.market.flush();
         this.pushBalances(); // production changes the player's holdings + labor, not the book
+      } catch (e) {
+        client.send("error", { message: errMsg(e) });
+      }
+    });
+
+    this.onMessage<CommodityMsg>("buildSite", async (client, msg) => {
+      try {
+        this.market.buildSite(this.pid(client), String(msg?.commodity));
+        await this.market.flush();
+        this.syncFlag(); // the site levy fed the flag
+        this.pushBalances();
+      } catch (e) {
+        client.send("error", { message: errMsg(e) });
+      }
+    });
+
+    this.onMessage<CommodityMsg>("extract", async (client, msg) => {
+      try {
+        this.market.extract(this.pid(client), String(msg?.commodity));
+        await this.market.flush();
+        this.syncFlag(); // the extraction fee's flag share fed the flag
+        this.pushBalances(); // raw added to holdings; labor + PoE spent
       } catch (e) {
         client.send("error", { message: errMsg(e) });
       }

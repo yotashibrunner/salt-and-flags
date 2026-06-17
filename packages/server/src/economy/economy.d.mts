@@ -61,6 +61,7 @@ export class Exchange {
   ships?: Map<string, ShipRec>;           // added by the Market layer (located inventory)
   _sid?: number;                          // ship-id counter (Market layer)
   upkeepTs?: Map<string, number>;         // `${owner}:${island}` -> last upkeep timestamp
+  sites?: Map<string, { owner: string; island: string; commodity: string }>; // extraction sites
 
   createAccount(id: string, poe?: number, inv?: Record<string, number>): Account;
   acct(id: string): Account;

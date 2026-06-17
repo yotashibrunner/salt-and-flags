@@ -74,9 +74,9 @@ test("invariant fuzz: random ops across islands/players never break conservation
 
   const islands = ["isleA", "isleB", "isleC"];
   const cfg = {
-    isleA: { flag: "wardens", taxRate: 0.05, produces: ["rum"], demands: [] },
+    isleA: { flag: "wardens", taxRate: 0.05, produces: ["rum", "sugar"], demands: [] }, // sugar extractable here
     isleB: { flag: "gulls", taxRate: 0.05, produces: [], demands: ["rum"] },
-    isleC: { flag: null, taxRate: 0, produces: [], demands: [] },
+    isleC: { flag: null, taxRate: 0, produces: ["wood"], demands: [] },                 // wood extractable here
   };
   const markets = {};
   for (const id of islands) {
@@ -93,7 +93,7 @@ test("invariant fuzz: random ops across islands/players never break conservation
   // "sink" (loss-on-sinking) is exercised by sinks.test.mjs; it's left out here so it
   // doesn't deplete the fleet and starve the cargo/move/repair ops of ships to act on.
   const ops = [
-    "buy", "sell", "cancel", "build", "produce",
+    "buy", "sell", "cancel", "build", "produce", "buildSite", "extract",
     "load", "unload", "move", "pledge", "seize", "payout", "award", "restock",
     "upkeep", "repair", "damage",
   ];
@@ -115,6 +115,8 @@ test("invariant fuzz: random ops across islands/players never break conservation
         }
         case "build": m.build(p, pick(rnd, m.recipes).id); break;
         case "produce": m.produce(p, pick(rnd, m.recipes).id); break;
+        case "buildSite": m.buildSite(p, c); break;   // throws unless c is a raw produced here
+        case "extract": m.extract(p, c); break;        // throws unless p owns a site for c here
         case "load": {
           const sh = m.balancesOf(p).ships.find((s) => s.dockedAt === m.island);
           if (sh) m.loadCargo(p, sh.id, c, 1 + ((rnd() * 5) | 0));
