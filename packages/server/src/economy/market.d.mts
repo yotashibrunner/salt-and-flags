@@ -18,6 +18,7 @@ export const BLOCKADE_START: number;
 export const BLOCKADE_MAX: number;
 export const BLOCKADE_STEP: number;
 export const BLOCKADE_LABOR: number;
+export const BLOCKADE_BATTLE_STEP: number;
 export const FLAGS: string[];
 export const BOUNTY: string;
 export const BOUNTY_RESERVE: number;
@@ -82,6 +83,7 @@ export type Intent =
   | { seq: number; kind: "crew_withdraw"; crew: string; owner: string; amount: number }
   | { seq: number; kind: "blockade_declare"; owner: string; island: string; attacker: string; defender: string | null; cost: number }
   | { seq: number; kind: "blockade_push"; owner: string; island: string; side: "attack" | "defend"; ts: number }
+  | { seq: number; kind: "blockade_battle"; island: string; side: "attack" | "defend" }
   | { seq: number; kind: "pledge"; owner: string; flag: string }
   | { seq: number; kind: "payout"; flag: string }
   | { seq: number; kind: "seize"; owner: string; island: string; flag: string; cost: number }
@@ -196,6 +198,7 @@ export class Market {
   declareBlockade(playerId: string, flag: string): void;
   pushBlockade(playerId: string): void;
   defendBlockade(playerId: string): void;
+  battlePush(playerId: string, island?: string): "attack" | "defend" | null;
   award(playerId: string, amount: number): void;
   payout(playerId: string): number;
   produce(playerId: string, recipeId: string): Recipe;

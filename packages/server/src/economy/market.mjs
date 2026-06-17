@@ -213,8 +213,9 @@ function applySeize(ex, owner, island, flag, cost) {
 export const BLOCKADE_COST = 200; // PoE to declare (-> warchest sink)
 export const BLOCKADE_START = 50; // control meter at declaration
 export const BLOCKADE_MAX = 100;  // attacker wins at >= MAX, defender holds at <= 0
-export const BLOCKADE_STEP = 10;  // meter shift per push
+export const BLOCKADE_STEP = 10;  // meter shift per labor push
 export const BLOCKADE_LABOR = 8;  // labor spent per push
+export const BLOCKADE_BATTLE_STEP = 25; // meter shift from WINNING a battle in contested waters
 
 function applyDeclareBlockade(ex, owner, island, attacker, defender, cost) {
   if (!ex.blockades) ex.blockades = new Map();
@@ -225,20 +226,27 @@ function applyDeclareBlockade(ex, owner, island, attacker, defender, cost) {
   ex.blockades.set(island, { attacker, defender: defender ?? null, meter: BLOCKADE_START });
 }
 
-// One push on the blockade at `island`: spend labor, shift the meter (attack=up,
-// defend=down), and resolve if it hits a bound. The attacker taking the island reroutes
-// its royalties (islandFlag override). Labor-gated; throws if short (replay reproduces
-// the same state, so it won't throw there).
-function applyBlockadePush(ex, owner, island, side, now) {
+// Shift a blockade's meter (attack=up, defend=down) and resolve if it hits a bound: the
+// attacker taking the island reroutes its royalties (islandFlag override); the defender
+// holding lifts the blockade. No-op if there's no blockade. Shared by labor pushes and
+// battle wins. Used live AND on replay.
+function applyBlockadeMeter(ex, island, side, step) {
   const b = ex.blockades && ex.blockades.get(island);
-  if (!b) throw new Error("no blockade here");
+  if (!b) return;
+  b.meter += side === "attack" ? step : -step;
+  if (b.meter >= BLOCKADE_MAX) { if (!ex.islandFlag) ex.islandFlag = new Map(); ex.islandFlag.set(island, b.attacker); ex.blockades.delete(island); }
+  else if (b.meter <= 0) { ex.blockades.delete(island); }
+}
+
+// One LABOR push on the blockade at `island`: spend labor, then shift the meter. Labor-
+// gated; throws if short (replay reproduces the same state, so it won't throw there).
+function applyBlockadePush(ex, owner, island, side, now) {
+  if (!ex.blockades || !ex.blockades.get(island)) throw new Error("no blockade here");
   if (!ex.labor) ex.labor = new Map();
   const have = laborAt(ex, owner, now);
   if (have < BLOCKADE_LABOR) throw new Error(`not enough labor (need ${BLOCKADE_LABOR}, have ${have})`);
   ex.labor.set(owner, { amount: have - BLOCKADE_LABOR, ts: now });
-  b.meter += side === "attack" ? BLOCKADE_STEP : -BLOCKADE_STEP;
-  if (b.meter >= BLOCKADE_MAX) { if (!ex.islandFlag) ex.islandFlag = new Map(); ex.islandFlag.set(island, b.attacker); ex.blockades.delete(island); }
-  else if (b.meter <= 0) { ex.blockades.delete(island); }
+  applyBlockadeMeter(ex, island, side, BLOCKADE_STEP);
 }
 
 // --- flag membership + payouts (the spend side of royalties) ---
@@ -965,6 +973,20 @@ export class Market {
     if (this.store) this._record({ kind: "blockade_push", owner: playerId, island: this.island, side: "defend", ts });
   }
 
+  // Winning a battle in contested waters advances your faction's blockade (no labor — the
+  // battle WAS the effort). Pushes for whichever side `playerId` is pledged to; a no-op if
+  // there's no blockade or the captain is in neither flag. Called by the hub on a win.
+  battlePush(playerId, island = this.island) {
+    const b = this.ex.blockades.get(island);
+    if (!b) return null;
+    const side = this.isPledged(playerId, b.attacker) ? "attack"
+      : (b.defender && this.isPledged(playerId, b.defender)) ? "defend" : null;
+    if (!side) return null;
+    applyBlockadeMeter(this.ex, island, side, BLOCKADE_BATTLE_STEP);
+    if (this.store) this._record({ kind: "blockade_battle", island, side });
+    return side;
+  }
+
   // --- crews: form/join + the shared coffer (contribute / captain withdraws) ---
   formCrew(playerId, name) {
     this.ex.acct(playerId); // must be a real account
@@ -1200,6 +1222,7 @@ export function replay(ex, intents) {
     else if (it.kind === "crew_withdraw") applyCrewWithdraw(ex, it.crew, it.owner, it.amount);
     else if (it.kind === "blockade_declare") applyDeclareBlockade(ex, it.owner, it.island, it.attacker, it.defender ?? null, it.cost ?? BLOCKADE_COST);
     else if (it.kind === "blockade_push") applyBlockadePush(ex, it.owner, it.island, it.side, it.ts ?? 0);
+    else if (it.kind === "blockade_battle") applyBlockadeMeter(ex, it.island, it.side, BLOCKADE_BATTLE_STEP);
     else if (it.kind === "pledge") applyPledge(ex, it.owner, it.flag);
     else if (it.kind === "payout") applyPayout(ex, it.flag);
     else if (it.kind === "seize") applySeize(ex, it.owner, it.island, it.flag, it.cost ?? CONQUEST_COST);

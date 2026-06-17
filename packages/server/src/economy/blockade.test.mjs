@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Exchange } from "./economy.mjs";
-import { Market, replay, BLOCKADE_COST, BLOCKADE_START, BLOCKADE_STEP, BLOCKADE_LABOR, WARCHEST } from "./market.mjs";
+import { Market, replay, BLOCKADE_COST, BLOCKADE_START, BLOCKADE_STEP, BLOCKADE_LABOR, BLOCKADE_BATTLE_STEP, WARCHEST } from "./market.mjs";
 import { checkAll } from "./invariants.mjs";
 
 class MemStore {
@@ -60,6 +60,36 @@ test("blockade gating: must be pledged, can't blockade what you already hold, on
   m.pledge("p", "wardens");
   m.declareBlockade("p", "wardens");
   assert.throws(() => m.declareBlockade("p", "wardens"), /already under blockade/);
+  assert.equal(checkAll(ex), null);
+});
+
+test("winning a battle in contested waters advances your faction's blockade (no labor)", () => {
+  const ex = new Exchange();
+  let clock = 0; const now = () => clock;
+  const m = new Market("isleA", { exchange: ex, flag: "sash", now });
+  m.seedLiquidity();
+  m.join("att"); m.join("def"); m.join("bystander");
+  m.pledge("att", "wardens"); m.pledge("def", "sash");
+  m.declareBlockade("att", "wardens"); // meter 50, wardens vs sash
+
+  // a bystander in neither flag winning a battle does nothing
+  assert.equal(m.battlePush("bystander"), null);
+  assert.equal(m.blockadeHere().meter, BLOCKADE_START);
+
+  // an attacker's battle win pushes the meter up by the (bigger) battle step — no labor cost
+  const labor0 = m.balancesOf("att").labor;
+  assert.equal(m.battlePush("att"), "attack");
+  assert.equal(m.blockadeHere().meter, BLOCKADE_START + BLOCKADE_BATTLE_STEP);
+  assert.equal(m.balancesOf("att").labor, labor0, "battle pushes cost no labor");
+
+  // a defender's win pushes it back down
+  assert.equal(m.battlePush("def"), "defend");
+  assert.equal(m.blockadeHere().meter, BLOCKADE_START + BLOCKADE_BATTLE_STEP - BLOCKADE_BATTLE_STEP);
+
+  // enough attacker wins take the island
+  m.battlePush("att"); m.battlePush("att"); // 50 -> 75 -> 100 -> seized
+  assert.equal(m.blockadeHere(), null, "blockade resolved by battle wins");
+  assert.equal(m.flag, "wardens", "wardens seized via combat");
   assert.equal(checkAll(ex), null);
 });
 

@@ -66,11 +66,15 @@ export class MarketHub {
   // the player ship is sunk (loss-on-sinking). All conserving + persisted.
   async concludeBattle(
     winner: "player" | "enemy",
-    opts: { playerShipId?: string; playerHull?: number; enemyShipId?: string; plunderTo?: string[]; plunder?: number },
+    opts: { playerShipId?: string; playerHull?: number; enemyShipId?: string; plunderTo?: string[]; plunder?: number; island?: string },
   ) {
     const s = this.sys();
     if (winner === "player") {
-      for (const p of opts.plunderTo ?? []) { s.join(p); s.award(p, opts.plunder ?? 0); }
+      for (const p of opts.plunderTo ?? []) {
+        s.join(p);
+        s.award(p, opts.plunder ?? 0);
+        if (opts.island) s.battlePush(p, opts.island); // a win in contested waters advances your blockade
+      }
       if (opts.enemyShipId) s.resolveShip(opts.enemyShipId, 0);
       if (opts.playerShipId) s.resolveShip(opts.playerShipId, opts.playerHull ?? 0);
     } else if (opts.playerShipId) {

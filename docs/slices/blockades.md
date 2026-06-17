@@ -35,3 +35,12 @@ server + client tsc + vite build clean.
 - Tie pushes to combat: a won PillageRoom battle near the island pushes the meter (instead
   of / in addition to the labor grind) — the hub.concludeBattle hook is the seam.
 - A scheduled window (`blockades.scheduled_at`) for timed contests rather than pure meter.
+
+## Update — battle↔blockade integration (implemented)
+The first follow-on is done: winning a PillageRoom battle in a blockaded island's waters
+now advances the meter for the winner's faction (`Market.battlePush` → `applyBlockadeMeter`
+by `BLOCKADE_BATTLE_STEP` = 25, no labor — the battle was the effort). `hub.concludeBattle`
+calls it for each winning crew member with the battle's `island`; a captain in neither flag
+is a no-op. Recorded as a `blockade_battle` intent; replay-safe. So a blockade now resolves
+by labor pushes AND combat wins together. Covered by `blockade.test.mjs` ("winning a battle
+in contested waters advances your faction's blockade").
