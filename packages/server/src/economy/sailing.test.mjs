@@ -77,7 +77,9 @@ test("a transit encounter can sink a ship — cargo lost, ship gone (loss-on-sin
   const arrived = A.tickVoyages();
   assert.equal(arrived[0].sunk, true, "the ship was sunk in transit");
   assert.equal(A.balancesOf("cap").ships.length, 0, "ship gone");
-  assert.equal(ex.totalUnits("rum"), rumBefore - 8, "the hold's cargo went down with it (burned)");
+  // of 8 rum: 40% (3) washes up as a wreck at the destination B, the rest (5) is lost
+  assert.equal(ex.totalUnits("rum"), rumBefore - 5, "most cargo lost; the salvageable share survives");
+  assert.equal(ex.invOf("wreck:B", "rum"), 3, "salvage washed up at the voyage destination");
   assert.equal(ex.accounts.has(`hold:${ship.id}`), false, "no orphan hold");
   assert.equal(checkAll(ex), null);
 });

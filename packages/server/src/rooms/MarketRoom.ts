@@ -195,6 +195,16 @@ export class MarketRoom extends Room<MarketState> {
       }
     });
 
+    this.onMessage<CargoMsg>("salvage", async (client, msg) => {
+      try {
+        this.market.salvage(this.pid(client), String(msg?.commodity), Number(msg?.qty));
+        await this.market.flush();
+        this.pushBalances(); // wreck goods move into the player's warehouse here
+      } catch (e) {
+        client.send("error", { message: errMsg(e) });
+      }
+    });
+
     // --- cargo: move goods between this port's warehouse and a docked ship's hold,
     // and sail a ship to another port (instant stub). All change located inventory
     // only (no book/PoE), so just resync the acting client's balances. ---

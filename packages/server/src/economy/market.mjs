@@ -339,6 +339,7 @@ export const REPAIR_PER_HULL = 4; // PoE per hull point to repair at a port (a S
 export const SHIP_PRICE = { sloop: 300, brig: 900, frigate: 1800, galleon: 3600 }; // shipyard purchase price (a SINK)
 export const SHIP_SAIL = { sloop: 10, brig: 14, frigate: 18, galleon: 16 }; // mirrors @salt/shared SHIP_CLASSES.sail
 export const TRAVEL_MS_PER_DIST = 600; // voyage ms per lane-distance unit, before the ship's sail divides it
+export const SALVAGE_BPS = 4000; // fraction of a sunk ship's cargo that washes up as a recoverable wreck (rest lost)
 
 // Deterministic transit encounter for a voyage. Pure (no RNG state) — the roll is a
 // hash of (shipId, departAt), so it reproduces on replay and in tests, while the OUTCOME
@@ -444,17 +445,37 @@ function applyRepair(ex, owner, shipId, flag) {
   s.hull = Math.min(s.maxHull, s.hull + Math.floor(charged / REPAIR_PER_HULL));
   return charged;
 }
-// Loss-on-sinking: destroy a sunk ship's cargo (a goods SINK — burned, so
-// mintedUnits stays reconciled), drop its hold account, and remove the ship.
+// Loss-on-sinking: most of a sunk ship's cargo is lost to the deep (burned, so
+// mintedUnits stays reconciled), but SALVAGE_BPS of it washes up as a WRECK at the
+// nearest port (the voyage destination, or where it was docked) — a recoverable faucet
+// any captain can salvage. Drops the hold account and removes the ship.
 function applyScuttle(ex, shipId) {
   const s = ex.ships && ex.ships.get(shipId);
   if (!s) return;
+  const loc = s.voyage ? s.voyage.to : s.dockedAt; // where the wreck settles
   const h = ex.accounts.get(holdId(shipId));
   if (h) {
-    for (const c of Object.keys(h.inv)) if (h.inv[c] > 0) ex.burn(holdId(shipId), c, h.inv[c]);
+    for (const c of Object.keys(h.inv)) {
+      const q = h.inv[c];
+      if (q <= 0) continue;
+      const salvaged = loc ? Math.floor((q * SALVAGE_BPS) / 10000) : 0;
+      const burned = q - salvaged;
+      if (burned > 0) ex.burn(holdId(shipId), c, burned);
+      if (salvaged > 0) { h.inv[c] -= salvaged; const w = ex._inv(`wreck:${loc}`); w.inv[c] = (w.inv[c] || 0) + salvaged; }
+    }
     ex.accounts.delete(holdId(shipId)); // no orphan hold left behind (location integrity)
   }
   ex.ships.delete(shipId);
+}
+
+// Recover `qty` of `commodity` from the wreck at `island` into the owner's warehouse
+// there (a located transfer — no mint). Used live AND on replay.
+function applySalvage(ex, owner, island, commodity, qty) {
+  const w = ex.accounts.get(`wreck:${island}`);
+  if (!w || (w.inv[commodity] || 0) < qty || qty <= 0) return;
+  w.inv[commodity] -= qty;
+  const wh = ex._inv(ex.whId(owner, island));
+  wh.inv[commodity] = (wh.inv[commodity] || 0) + qty;
 }
 
 // Seed prices are skewed by what the island produces vs. demands, so the same
@@ -829,6 +850,24 @@ export class Market {
     if (this.store) { this._record({ kind: "extract", owner: playerId, island: this.island, commodity, fee: EXTRACT_FEE, flag: this.flag, ts }); this._captureAudit(lLen, tLen); }
   }
 
+  // Goods washed up here from sunk ships, available to salvage (commodity -> qty).
+  wreckHere() {
+    const w = this.ex.accounts.get(`wreck:${this.island}`);
+    const out = {};
+    if (w) for (const c of this.commodities) if (w.inv[c]) out[c] = w.inv[c];
+    return out;
+  }
+  // Salvage up to `qty` of `commodity` from this island's wreck into your warehouse.
+  salvage(playerId, commodity, qty) {
+    if (!this.commodities.includes(commodity)) throw new Error(`unknown commodity: ${commodity}`);
+    const w = this.ex.accounts.get(`wreck:${this.island}`);
+    const take = Math.min(Math.max(0, Math.floor(qty)), (w && w.inv[commodity]) || 0);
+    if (take <= 0) throw new Error(`no ${commodity} to salvage here`);
+    applySalvage(this.ex, playerId, this.island, commodity, take);
+    if (this.store) this._record({ kind: "salvage", owner: playerId, island: this.island, commodity, qty: take });
+    return take;
+  }
+
   // Returns the cancelled order's commodity (so the room can resync that book),
   // or null if there was nothing to cancel. Throws if the order isn't the caller's.
   cancel(playerId, orderId) {
@@ -933,7 +972,7 @@ export class Market {
       const voyage = s.voyage ? { from: s.voyage.from, to: s.voyage.to, arriveAt: s.voyage.arriveAt } : null;
       ships.push({ id, cls: s.cls, dockedAt: s.dockedAt, voyage, cargoCap: SHIP_CARGO[s.cls] ?? 0, hull: s.hull, maxHull: s.maxHull, hold });
     }
-    return { poe: a.poe, labor: laborAt(this.ex, playerId, now), holdings, orders, stalls, sites, ships, pledged: this.isPledged(playerId), myFlags: this.flagsOf(playerId) };
+    return { poe: a.poe, labor: laborAt(this.ex, playerId, now), holdings, orders, stalls, sites, ships, wreck: this.wreckHere(), pledged: this.isPledged(playerId), myFlags: this.flagsOf(playerId) };
   }
 
   // --- conservation totals (tests / ops) ---
@@ -985,6 +1024,7 @@ export function replay(ex, intents) {
     else if (it.kind === "build") applyBuild(ex, it.owner, it.island, it.recipe, it.to ?? UNCLAIMED_TREASURY);
     else if (it.kind === "site") applyBuildSite(ex, it.owner, it.island, it.commodity, it.to ?? UNCLAIMED_TREASURY);
     else if (it.kind === "extract") applyExtract(ex, it.owner, it.island, it.commodity, it.fee ?? EXTRACT_FEE, it.flag ?? null, it.ts ?? 0);
+    else if (it.kind === "salvage") applySalvage(ex, it.owner, it.island, it.commodity, it.qty);
     else if (it.kind === "pledge") applyPledge(ex, it.owner, it.flag);
     else if (it.kind === "payout") applyPayout(ex, it.flag);
     else if (it.kind === "seize") applySeize(ex, it.owner, it.island, it.flag, it.cost ?? CONQUEST_COST);

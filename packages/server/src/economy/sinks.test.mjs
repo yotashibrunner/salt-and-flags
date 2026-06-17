@@ -93,7 +93,9 @@ test("loss-on-sinking: a sunk ship's cargo is burned and the ship is removed", (
   m.resolveShip(ship.id, 0); // hull <= 0 -> SINK
 
   assert.equal(m.balancesOf("p1").ships.length, 0, "the ship is gone");
-  assert.equal(m.totalUnits("rum"), rumBefore - 10, "the hold's cargo was burned (a goods sink)");
+  // 40% washes up as a salvageable wreck here; the rest (6 of 10) is lost to the deep
+  assert.equal(m.totalUnits("rum"), rumBefore - 6, "most cargo burned, the salvageable share remains");
+  assert.equal(m.wreckHere().rum, 4, "40% of the hold washed up as a wreck");
   assert.equal(m.ex.accounts.has(`hold:${ship.id}`), false, "no orphan hold account left behind");
   assert.equal(checkAll(m.ex), null, "no orphan_hold / units stay reconciled");
 });

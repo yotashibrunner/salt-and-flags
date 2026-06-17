@@ -27,6 +27,7 @@ export const REPAIR_PER_HULL: number;
 export const SHIP_PRICE: Record<string, number>;
 export const SHIP_SAIL: Record<string, number>;
 export const TRAVEL_MS_PER_DIST: number;
+export const SALVAGE_BPS: number;
 export function voyageEncounter(shipId: string, departAt: number, danger: number, hull: number, maxHull: number): { hit: boolean; sunk: boolean; hull: number; dmg: number };
 export const CROWN: string;
 export const SINK_BURN_BPS: number;
@@ -67,6 +68,7 @@ export type Intent =
   | { seq: number; kind: "produce"; owner: string; island: string; recipe: string; ts: number }
   | { seq: number; kind: "site"; owner: string; island: string; commodity: string; to: string }
   | { seq: number; kind: "extract"; owner: string; island: string; commodity: string; fee: number; flag: string | null; ts: number }
+  | { seq: number; kind: "salvage"; owner: string; island: string; commodity: string; qty: number }
   | { seq: number; kind: "pledge"; owner: string; flag: string }
   | { seq: number; kind: "payout"; flag: string }
   | { seq: number; kind: "seize"; owner: string; island: string; flag: string; cost: number }
@@ -132,6 +134,7 @@ export interface Balances {
   orders: RestingOrder[];
   stalls: string[]; // recipe ids this player owns a stall for on this island
   sites: string[];  // raw commodities this player owns an extraction site for here
+  wreck: Record<string, number>; // goods salvageable from sunk ships at this island
   ships: ShipBalance[]; // the captain's whole fleet + each hold's contents
   pledged: boolean; // pledged to this island's controlling flag?
   myFlags: string[]; // every flag this player is pledged to
@@ -159,6 +162,8 @@ export class Market {
   buildSite(playerId: string, commodity: string): { owner: string; island: string; commodity: string };
   extract(playerId: string, commodity: string): void;
   buyShip(playerId: string, cls: string): string;
+  wreckHere(): Record<string, number>;
+  salvage(playerId: string, commodity: string, qty: number): number;
   readonly flag: string | null;
   flagTreasury(): number;
   flagMemberCount(): number;
