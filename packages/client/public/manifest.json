@@ -1,0 +1,10 @@
+{
+  "name": "Salt & Flags",
+  "short_name": "Salt & Flags",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#06141a",
+  "theme_color": "#06141a",
+  "icons": []
+}

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Salt &amp; Flags — Market</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font: 14px ui-monospace, monospace; background: #06141a; color: #ece6d4; }
+    header { padding: 10px 14px; border-bottom: 1px solid #1d3640; display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+    header h1 { font-size: 15px; margin: 0; color: #d6a73e; }
+    main { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 14px; max-width: 760px; }
+    section { border: 1px solid #1d3640; border-radius: 6px; padding: 10px 12px; }
+    h2 { font-size: 13px; margin: 0 0 8px; color: #9bb; text-transform: uppercase; letter-spacing: .05em; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { text-align: right; padding: 2px 6px; }
+    th { color: #6f8a93; font-weight: normal; border-bottom: 1px solid #1d3640; }
+    .bid { color: #5fd08a; } .ask { color: #e2643e; }
+    .last { font-size: 18px; color: #d6a73e; }
+    label { display: block; margin: 6px 0 2px; color: #9bb; font-size: 12px; }
+    input, select, button { font: inherit; background: #0c2630; color: #ece6d4; border: 1px solid #1d3640; border-radius: 4px; padding: 5px 8px; }
+    button { cursor: pointer; }
+    button.buy { background: #14361f; border-color: #2c6b3f; }
+    button.sell { background: #3a1a12; border-color: #6b2c1f; }
+    button:hover { filter: brightness(1.2); }
+    .row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+    .holdings { display: grid; grid-template-columns: 1fr auto; gap: 1px 12px; }
+    .orders td { text-align: left; }
+    #msg { color: #e2643e; min-height: 18px; padding: 0 14px; }
+    .x { cursor: pointer; color: #e2643e; border: none; background: none; padding: 0 4px; }
+    .poe { font-size: 16px; color: #d6a73e; }
+    a { color: #6f8a93; }
+    .stalls { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+    .stall { border: 1px solid #1d3640; border-radius: 5px; padding: 8px 10px; }
+    .stall .name { color: #d6a73e; }
+    .stall .io { color: #9bb; font-size: 12px; margin: 4px 0; }
+    .stall button { width: 100%; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Salt &amp; Flags — Market</h1>
+    <span>island:
+      <select id="islandsel"></select>
+      <b id="region"></b>
+    </span>
+    <span>flag: <b id="flag">—</b></span>
+    <span>you: <b id="me">…</b></span>
+    <span>commodity:
+      <select id="commodity"></select>
+      <b id="tag"></b>
+    </span>
+    <a href="/">← chart</a>
+  </header>
+  <div id="msg"></div>
+  <main>
+    <section>
+      <h2>Order Book</h2>
+      <div>last: <span class="last" id="last">—</span></div>
+      <div class="row" style="margin-top:8px; align-items:flex-start;">
+        <div style="flex:1">
+          <table><thead><tr><th>bid qty</th><th>bid price</th></tr></thead><tbody id="bids"></tbody></table>
+        </div>
+        <div style="flex:1">
+          <table><thead><tr><th>ask price</th><th>ask qty</th></tr></thead><tbody id="asks"></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Place Limit Order</h2>
+      <div class="row">
+        <div><label>price (PoE)</label><input id="price" type="number" min="1" step="1" value="0" style="width:90px" /></div>
+        <div><label>qty</label><input id="qty" type="number" min="1" step="1" value="1" style="width:70px" /></div>
+        <button class="buy" id="buy">Buy</button>
+        <button class="sell" id="sell">Sell</button>
+      </div>
+
+      <h2 style="margin-top:16px">Your Account</h2>
+      <div>PoE: <span class="poe" id="poe">—</span> &nbsp; labor: <span class="poe" id="labor">—</span></div>
+      <div class="holdings" id="holdings"></div>
+
+      <h2 style="margin-top:16px">Your Resting Orders</h2>
+      <table class="orders"><tbody id="myorders"></tbody></table>
+    </section>
+
+    <section style="grid-column:1 / -1">
+      <h2>Stalls — Production (make goods to trade)</h2>
+      <div id="stalls" class="stalls"></div>
+    </section>
+
+    <section style="grid-column:1 / -1">
+      <h2>Flag — Royalties</h2>
+      <div id="flagpanel" class="row" style="align-items:center"></div>
+    </section>
+  </main>
+  <script type="module" src="/src/market.ts"></script>
+</body>
+</html>

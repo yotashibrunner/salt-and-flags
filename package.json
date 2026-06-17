@@ -1,0 +1,22 @@
+{
+  "name": "salt-and-flags",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/client"
+  ],
+  "scripts": {
+    "dev:server": "npm -w @salt/server run dev",
+    "dev:client": "npm -w @salt/client run dev",
+    "build": "npm -w @salt/shared run build && npm -w @salt/server run build && npm -w @salt/client run build",
+    "migrate": "npm -w @salt/server run migrate",
+    "test": "npm -w @salt/server run test",
+    "typecheck": "npm -w @salt/shared run typecheck && npm -w @salt/server run typecheck && npm -w @salt/client run typecheck",
+    "e2e:market": "npm -w @salt/client run e2e:market"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

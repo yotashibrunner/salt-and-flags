@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Salt &amp; Flags — Pillage</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font: 14px ui-monospace, monospace; background: #06141a; color: #ece6d4; }
+    header { padding: 10px 14px; border-bottom: 1px solid #1d3640; display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
+    header h1 { font-size: 15px; margin: 0; color: #d6a73e; }
+    header b { color: #d6a73e; }
+    main { display: flex; gap: 18px; padding: 14px; flex-wrap: wrap; }
+    canvas { background: #0a1f29; border: 1px solid #1d3640; border-radius: 6px; }
+    .panel { min-width: 230px; max-width: 320px; }
+    section { border: 1px solid #1d3640; border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; }
+    h2 { font-size: 13px; margin: 0 0 8px; color: #9bb; text-transform: uppercase; letter-spacing: .05em; }
+    button, input { font: inherit; background: #0c2630; color: #ece6d4; border: 1px solid #1d3640; border-radius: 4px; padding: 5px 8px; cursor: pointer; }
+    button:hover:not(:disabled) { filter: brightness(1.25); }
+    button:disabled { opacity: .4; cursor: default; }
+    .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .moves { font-size: 18px; letter-spacing: 3px; color: #d6a73e; min-height: 24px; }
+    .res { display: grid; grid-template-columns: auto auto; gap: 1px 12px; }
+    #msg { color: #5fd08a; min-height: 18px; }
+    .gun { width: 54px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Salt &amp; Flags — Pillage</h1>
+    <span>phase: <b id="phase">…</b></span>
+    <span>round: <b id="round">–</b></span>
+    <span id="timer"></span>
+    <span id="result" style="color:#e2643e"></span>
+    <a href="/" style="color:#6f8a93">← chart</a>
+  </header>
+  <main>
+    <canvas id="board"></canvas>
+    <div class="panel">
+      <section>
+        <h2>Rig (gather)</h2>
+        <div class="res">
+          <div>wind</div><div><b id="wind">0</b> / 4</div>
+          <div>powder</div><div><b id="powder">0</b> / 4</div>
+          <div>hull</div><div><b id="hull">16</b></div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button data-clear="wind">⛵ sail +wind</button>
+          <button data-clear="powder">💣 load +powder</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Plot your turn</h2>
+        <div class="moves" id="plotmoves">— — — —</div>
+        <div class="row">
+          <button class="mv" data-mv="L">◰ left</button>
+          <button class="mv" data-mv="F">▲ ahead</button>
+          <button class="mv" data-mv="R">◳ right</button>
+          <button id="clearmoves">clear</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <label>port <input class="gun" id="ballsPort" type="number" min="0" value="0" /></label>
+          <label>star <input class="gun" id="ballsStar" type="number" min="0" value="0" /></label>
+        </div>
+        <button id="commit" style="margin-top:8px; width:100%">Commit plot</button>
+      </section>
+
+      <div id="msg"></div>
+    </div>
+  </main>
+  <script type="module" src="/src/pillage.ts"></script>
+</body>
+</html>
