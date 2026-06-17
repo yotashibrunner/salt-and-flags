@@ -67,6 +67,8 @@ export class Exchange {
   _cid?: number; // crew-id counter
   blockades?: Map<string, { attacker: string; defender: string | null; meter: number }>; // contested islands
   islandFlag?: Map<string, string>; // island -> controlling flag override (conquest/blockade)
+  names?: Map<string, string>;       // playerId -> captain name
+  nameOwners?: Map<string, string>;  // name -> playerId (uniqueness)
   onboarded?: Set<string>; // players who have received their one-time starter ship + goods
 
   createAccount(id: string, poe?: number, inv?: Record<string, number>): Account;

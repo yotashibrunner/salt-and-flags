@@ -17,13 +17,13 @@ interface Level { price: number; qty: number; }
 interface RestingOrder { id: number; commodity: string; side: "buy" | "sell"; price: number; qty: number; }
 interface ShipBalance { id: string; cls: string; dockedAt: string | null; voyage: { from: string; to: string; arriveAt: number } | null; cargoCap: number; hull: number; maxHull: number; hold: Record<string, number>; }
 interface CrewView { id: string; name: string; coffer: number; members: number; captain: boolean; }
-interface Balances { poe: number; labor: number; holdings: Record<string, number>; orders: RestingOrder[]; stalls: string[]; sites: string[]; wreck: Record<string, number>; crews: CrewView[]; ships: ShipBalance[]; pledged: boolean; myFlags: string[]; }
+interface Balances { poe: number; name: string; labor: number; holdings: Record<string, number>; orders: RestingOrder[]; stalls: string[]; sites: string[]; wreck: Record<string, number>; crews: CrewView[]; ships: ShipBalance[]; pledged: boolean; myFlags: string[]; }
 interface Recipe { id: string; stall: string; inputs: Record<string, number>; outputs: Record<string, number>; labor: number; }
 interface Hello { playerId: string; island: string; islandName: string; region: string; commodities: string[]; produces: string[]; demands: string[]; recipes: Recipe[]; stallCost: number; flags: string[]; conquestCost: number; shipCargo: Record<string, number>; shipPrice: Record<string, number>; raws: string[]; }
 interface WorldIsland { id: string; name: string; region: string; }
 interface WorldLane { a: string; b: string; dist: number; }
 
-const EMPTY_BALANCES: Balances = { poe: 0, labor: 0, holdings: {}, orders: [], stalls: [], sites: [], wreck: {}, crews: [], ships: [], pledged: false, myFlags: [] };
+const EMPTY_BALANCES: Balances = { poe: 0, name: "", labor: 0, holdings: {}, orders: [], stalls: [], sites: [], wreck: {}, crews: [], ships: [], pledged: false, myFlags: [] };
 
 const $ = (id: string) => document.getElementById(id)!;
 const islandSel = $("islandsel") as HTMLSelectElement, regionEl = $("region"), meEl = $("me"), msgEl = $("msg");
@@ -52,6 +52,7 @@ let neighbors = new Map<string, string[]>(); // island -> lane-connected island 
 let balances: Balances = EMPTY_BALANCES;
 let selected = "";
 let island = ""; // the island this room is for
+let myId = "";   // our derived player id (for display until a name is set)
 
 function flash(text: string, isError = true) {
   msgEl.textContent = text;
@@ -237,6 +238,7 @@ function renderCrews() {
 }
 
 function renderBalances() {
+  meEl.textContent = balances.name || myId.slice(0, 10); // show the captain name once set
   poeEl.textContent = String(balances.poe);
   laborEl.textContent = String(balances.labor);
   renderStalls(); // affordability depends on holdings + labor
@@ -281,7 +283,8 @@ async function joinIsland(islandId: string) {
 
   room.onMessage("hello", (h: Hello) => {
     regionEl.textContent = `(${h.region})`;
-    meEl.textContent = h.playerId.slice(0, 8);
+    myId = h.playerId;
+    meEl.textContent = h.playerId.slice(0, 10);
     commodities = h.commodities;
     recipes = h.recipes;
     stallCost = h.stallCost;
@@ -334,6 +337,7 @@ async function boot() {
   ($("buy") as HTMLButtonElement).onclick = () => place("buy");
   ($("sell") as HTMLButtonElement).onclick = () => place("sell");
   raidBtn.onclick = () => room?.send("raid");
+  ($("setname") as HTMLButtonElement).onclick = () => { const n = ($("nameinput") as HTMLInputElement).value.trim(); if (n) room?.send("setName", { name: n }); };
   ($("crewform") as HTMLButtonElement).onclick = () => { if (crewNameEl.value.trim()) room?.send("crew:form", { name: crewNameEl.value.trim() }); };
   ($("crewjoin") as HTMLButtonElement).onclick = () => { if (crewJoinIdEl.value.trim()) room?.send("crew:join", { crewId: crewJoinIdEl.value.trim() }); };
 

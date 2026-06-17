@@ -13,6 +13,7 @@ export const STALL_COST: number;
 export const UNCLAIMED_TREASURY: string;
 export const CONQUEST_COST: number;
 export const WARCHEST: string;
+export const NAME_MAX: number;
 export const BLOCKADE_COST: number;
 export const BLOCKADE_START: number;
 export const BLOCKADE_MAX: number;
@@ -84,6 +85,7 @@ export type Intent =
   | { seq: number; kind: "blockade_declare"; owner: string; island: string; attacker: string; defender: string | null; cost: number }
   | { seq: number; kind: "blockade_push"; owner: string; island: string; side: "attack" | "defend"; ts: number }
   | { seq: number; kind: "blockade_battle"; island: string; side: "attack" | "defend" }
+  | { seq: number; kind: "name"; owner: string; name: string }
   | { seq: number; kind: "pledge"; owner: string; flag: string }
   | { seq: number; kind: "payout"; flag: string }
   | { seq: number; kind: "seize"; owner: string; island: string; flag: string; cost: number }
@@ -144,6 +146,7 @@ export interface ShipBalance {
 
 export interface Balances {
   poe: number;
+  name: string; // the captain's chosen display name ("" if unset)
   labor: number;
   holdings: Record<string, number>; // warehouse stock ON THIS ISLAND
   orders: RestingOrder[];
@@ -172,6 +175,8 @@ export class Market {
 
   hasPlayer(playerId: string): boolean;
   join(playerId: string): void;
+  nameOf(playerId: string): string;
+  setName(playerId: string, name: string): string;
 
   placeLimit(playerId: string, commodity: string, side: Side, price: number, qty: number): Order;
   build(playerId: string, recipeId: string): Stall;

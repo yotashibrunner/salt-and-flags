@@ -212,6 +212,12 @@ export class MarketRoom extends Room<MarketState> {
       }
     });
 
+    // Set the captain's display name (unique across players).
+    this.onMessage<FormCrewMsg>("setName", async (client, msg) => {
+      try { this.market.setName(this.pid(client), String(msg?.name)); await this.market.flush(); this.pushBalances(); }
+      catch (e) { client.send("error", { message: errMsg(e) }); }
+    });
+
     // --- crews: form/join a player group + pool PoE in a shared coffer ---
     this.onMessage<FormCrewMsg>("crew:form", async (client, msg) => {
       try { this.market.formCrew(this.pid(client), String(msg?.name)); await this.market.flush(); this.pushBalances(); }

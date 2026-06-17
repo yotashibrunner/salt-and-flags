@@ -304,6 +304,21 @@ function applyCrewWithdraw(ex, crewId, playerId, amount) {
   ex.ledger.postPair(crewCoffer(crewId), playerId, amount, "crew_withdraw");
 }
 
+// --- captain names: a human display name over the cryptographic player id. Unique
+// (one owner per name), claimable + renameable. No PoE, so it never touches the ledger.
+// Used live AND on replay. ---
+export const NAME_MAX = 24;
+function applySetName(ex, playerId, name) {
+  if (!ex.names) ex.names = new Map();        // playerId -> name
+  if (!ex.nameOwners) ex.nameOwners = new Map(); // name -> playerId (uniqueness)
+  const taken = ex.nameOwners.get(name);
+  if (taken && taken !== playerId) throw new Error(`the name "${name}" is already taken`);
+  const prev = ex.names.get(playerId);
+  if (prev && prev !== name) ex.nameOwners.delete(prev); // free the old name on rename
+  ex.names.set(playerId, name);
+  ex.nameOwners.set(name, playerId);
+}
+
 // Skim a commerce tax from each fill's SELLER (who was just credited the sale
 // proceeds, so the funds are always there — tax < proceeds, never negative) to the
 // island's controlling flag. PoE-conserving transfer, posted to the ledger. Used
@@ -595,6 +610,8 @@ export class Market {
     if (!this.ex.crews) this.ex.crews = new Map();   // crewId -> { name, captain, members:Set }
     if (this.ex._cid === undefined) this.ex._cid = 0; // crew-id counter
     if (!this.ex.blockades) this.ex.blockades = new Map(); // island -> { attacker, defender, meter }
+    if (!this.ex.names) this.ex.names = new Map();   // playerId -> captain name
+    if (!this.ex.nameOwners) this.ex.nameOwners = new Map(); // name -> playerId (uniqueness)
     this.recipes = RECIPES;
     this.store = opts.store ?? null;
     this._now = opts.now ?? (() => Date.now()); // wall clock for labor regen (injectable for tests)
@@ -987,6 +1004,17 @@ export class Market {
     return side;
   }
 
+  // --- captain name: claim/rename a unique human display name for your wallet ---
+  nameOf(playerId) { return (this.ex.names && this.ex.names.get(playerId)) || ""; }
+  setName(playerId, name) {
+    this.ex.acct(playerId); // must be a real account
+    const nm = String(name ?? "").trim().slice(0, NAME_MAX);
+    if (!nm) throw new Error("a name can't be empty");
+    applySetName(this.ex, playerId, nm);
+    if (this.store) this._record({ kind: "name", owner: playerId, name: nm });
+    return nm;
+  }
+
   // --- crews: form/join + the shared coffer (contribute / captain withdraws) ---
   formCrew(playerId, name) {
     this.ex.acct(playerId); // must be a real account
@@ -1159,7 +1187,7 @@ export class Market {
       const voyage = s.voyage ? { from: s.voyage.from, to: s.voyage.to, arriveAt: s.voyage.arriveAt } : null;
       ships.push({ id, cls: s.cls, dockedAt: s.dockedAt, voyage, cargoCap: SHIP_CARGO[s.cls] ?? 0, hull: s.hull, maxHull: s.maxHull, hold });
     }
-    return { poe: a.poe, labor: laborAt(this.ex, playerId, now), holdings, orders, stalls, sites, ships, wreck: this.wreckHere(), crews: this.crewsOf(playerId), pledged: this.isPledged(playerId), myFlags: this.flagsOf(playerId) };
+    return { poe: a.poe, name: this.nameOf(playerId), labor: laborAt(this.ex, playerId, now), holdings, orders, stalls, sites, ships, wreck: this.wreckHere(), crews: this.crewsOf(playerId), pledged: this.isPledged(playerId), myFlags: this.flagsOf(playerId) };
   }
 
   // --- conservation totals (tests / ops) ---
@@ -1183,6 +1211,8 @@ export function replay(ex, intents) {
   if (!ex.crews) ex.crews = new Map();
   if (ex._cid === undefined) ex._cid = 0;
   if (!ex.blockades) ex.blockades = new Map();
+  if (!ex.names) ex.names = new Map();
+  if (!ex.nameOwners) ex.nameOwners = new Map();
   const ordered = [...intents].sort((a, b) => a.seq - b.seq);
   for (const it of ordered) {
     if (it.kind === "account") { ex.createAccount(it.owner, it.poe); ex.labor.set(it.owner, { amount: LABOR_START, ts: it.ts ?? 0 }); }
@@ -1223,6 +1253,7 @@ export function replay(ex, intents) {
     else if (it.kind === "blockade_declare") applyDeclareBlockade(ex, it.owner, it.island, it.attacker, it.defender ?? null, it.cost ?? BLOCKADE_COST);
     else if (it.kind === "blockade_push") applyBlockadePush(ex, it.owner, it.island, it.side, it.ts ?? 0);
     else if (it.kind === "blockade_battle") applyBlockadeMeter(ex, it.island, it.side, BLOCKADE_BATTLE_STEP);
+    else if (it.kind === "name") applySetName(ex, it.owner, it.name);
     else if (it.kind === "pledge") applyPledge(ex, it.owner, it.flag);
     else if (it.kind === "payout") applyPayout(ex, it.flag);
     else if (it.kind === "seize") applySeize(ex, it.owner, it.island, it.flag, it.cost ?? CONQUEST_COST);
