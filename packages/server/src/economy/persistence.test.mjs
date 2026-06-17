@@ -2,6 +2,23 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Exchange } from "./economy.mjs";
 import { Market, replay, LABOR_START } from "./market.mjs";
+import { checkAll } from "./invariants.mjs";
+
+// A complete picture of LOCATED state: every ship's position + hold contents, and
+// every warehouse's stock. Acceptance criterion 5 is that this rebuilds identically
+// from an empty engine by replaying the intent log.
+function locatedSnapshot(ex) {
+  const ships = {};
+  for (const [id, s] of ex.ships) {
+    const hold = ex.accounts.get(`hold:${id}`);
+    ships[id] = { owner: s.owner, cls: s.cls, dockedAt: s.dockedAt, hold: { ...(hold ? hold.inv : {}) } };
+  }
+  const warehouses = {};
+  for (const a of ex.accounts.values()) {
+    if (a.id.startsWith("wh:")) warehouses[a.id] = { ...a.inv };
+  }
+  return { ships, warehouses };
+}
 
 // In-memory double of the Store interface (PgStore is the real Postgres impl).
 class MemStore {
@@ -144,4 +161,82 @@ test("a fresh log replays to an empty (but valid) exchange", () => {
   replay(ex, []);
   assert.equal(ex.totalPoe(), 0);
   assert.equal(ex.ledger.sum(), 0);
+});
+
+test("LOCATED state survives a restart: ships at different ports, partial holds, and per-island warehouses all rebuild IDENTICALLY", async () => {
+  const store = new MemStore();
+  let seq = 0; const nextSeq = () => ++seq;
+  const now = () => 5_000_000; // frozen clock so labor + produce replay deterministically
+
+  // --- live session: three islands sharing one engine, three captains ---
+  const ex1 = new Exchange();
+  const opts = { exchange: ex1, store, nextSeq, now };
+  const isleA = new Market("isleA", { ...opts, produces: ["iron"], demands: ["rum"], flag: "wardens", taxRate: 0.05 });
+  const isleB = new Market("isleB", { ...opts });
+  const isleC = new Market("isleC", { ...opts });
+  for (const m of [isleA, isleB, isleC]) { m.seedLiquidity(); await m.flush(); }
+
+  // captains home at DIFFERENT ports -> their starter sloops dock in different places
+  isleA.join("p1"); await isleA.flush();
+  isleB.join("p2"); await isleB.flush();
+  isleA.join("p3"); await isleA.flush();
+  const s1 = isleA.balancesOf("p1").ships[0].id;
+  const s2 = isleB.balancesOf("p2").ships[0].id;
+  const s3 = isleA.balancesOf("p3").ships[0].id;
+
+  // p1: partially load at A, SAIL to C, partially unload there (hold stays partial)
+  isleA.loadCargo("p1", s1, "rum", 7); await isleA.flush();
+  isleA.loadCargo("p1", s1, "iron", 3); await isleA.flush();
+  isleA.moveShip("p1", s1, "isleC"); await isleA.flush();
+  isleC.unloadCargo("p1", s1, "rum", 2); await isleC.flush();   // wh:p1:isleC gets 2 rum
+
+  // p2: load at B, sail to A, unload SOME (hold keeps a remainder)
+  isleB.loadCargo("p2", s2, "cloth", 5); await isleB.flush();
+  isleB.moveShip("p2", s2, "isleA"); await isleB.flush();
+  isleA.unloadCargo("p2", s2, "cloth", 3); await isleA.flush(); // hold keeps cloth 2
+
+  // p3: a taxed sale + located production, then load a little and stay docked at A
+  const bid = isleA.depth("rum").bids[0].price;
+  isleA.placeLimit("p3", "rum", "sell", bid, 4); await isleA.flush();
+  isleA.build("p3", "distill"); await isleA.flush();
+  isleA.produce("p3", "distill"); await isleA.flush();          // -3 sugar, +2 rum in wh:p3:isleA
+  isleA.loadCargo("p3", s3, "sugar", 2); await isleA.flush();
+
+  // sanity: the live located state is genuinely rich (guards against a vacuous pass)
+  const snap1 = locatedSnapshot(ex1);
+  assert.deepEqual(snap1.ships[s1], { owner: "p1", cls: "sloop", dockedAt: "isleC", hold: { rum: 5, iron: 3 } });
+  assert.deepEqual(snap1.ships[s2], { owner: "p2", cls: "sloop", dockedAt: "isleA", hold: { cloth: 2 } });
+  assert.deepEqual(snap1.ships[s3], { owner: "p3", cls: "sloop", dockedAt: "isleA", hold: { sugar: 2 } });
+  assert.equal(snap1.warehouses[ex1.whId("p1", "isleA")].rum, 18);  // 25 - 7 loaded
+  assert.equal(snap1.warehouses[ex1.whId("p1", "isleA")].iron, 22); // 25 - 3 loaded
+  assert.equal(snap1.warehouses[ex1.whId("p1", "isleC")].rum, 2);   // unloaded at C
+  assert.equal(snap1.warehouses[ex1.whId("p2", "isleB")].cloth, 20); // 25 - 5 loaded
+  assert.equal(snap1.warehouses[ex1.whId("p2", "isleA")].cloth, 3);  // unloaded at A
+  assert.equal(snap1.warehouses[ex1.whId("p3", "isleA")].rum, 23);   // 25 - 4 sold + 2 produced
+  assert.equal(snap1.warehouses[ex1.whId("p3", "isleA")].sugar, 20); // 25 - 3 produced - 2 loaded
+
+  // --- restart: replay the full intent log into a fresh, empty engine ---
+  const ex2 = new Exchange();
+  replay(ex2, await store.loadIntents());
+
+  // THE acceptance check: every ship position, hold, and warehouse rebuilt identically
+  assert.deepEqual(locatedSnapshot(ex2), snap1, "located state must rebuild byte-for-byte");
+
+  // and the player-facing views match across islands (holdings here + the whole fleet)
+  const a2 = new Market("isleA", { exchange: ex2, flag: "wardens", taxRate: 0.05, now });
+  const b2 = new Market("isleB", { exchange: ex2, now });
+  const c2 = new Market("isleC", { exchange: ex2, now });
+  assert.deepEqual(a2.balancesOf("p1"), isleA.balancesOf("p1"), "p1 @ isleA view identical");
+  assert.deepEqual(c2.balancesOf("p1"), isleC.balancesOf("p1"), "p1 @ isleC view identical");
+  assert.deepEqual(b2.balancesOf("p2"), isleB.balancesOf("p2"), "p2 @ isleB view identical");
+  assert.deepEqual(a2.balancesOf("p3"), isleA.balancesOf("p3"), "p3 @ isleA view identical");
+
+  // conservation + every invariant holds on the rebuilt engine
+  assert.equal(ex2.totalPoe(), ex1.totalPoe(), "PoE preserved");
+  for (const c of ["rum", "iron", "cloth", "sugar"]) {
+    assert.equal(ex2.totalUnits(c), ex1.totalUnits(c), `${c} units preserved`);
+  }
+  assert.equal(ex2.minted, ex1.minted, "minted PoE baseline preserved");
+  assert.deepEqual(ex2.mintedUnits, ex1.mintedUnits, "minted units baseline preserved");
+  assert.equal(checkAll(ex2), null, "all invariants hold after replay");
 });
