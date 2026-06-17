@@ -11,7 +11,7 @@
 // ============================================================================
 import { pathToFileURL } from "node:url";
 import { Exchange } from "./economy.mjs";
-import { Market, FLAGS, LISTING_FEE_BPS, DEMAND_LEVY_BPS, EXTRACT_FEE } from "./market.mjs";
+import { Market, FLAGS, LISTING_FEE_BPS, DEMAND_LEVY_BPS, EXTRACT_FEE, BOUNTY_RESERVE, DEMAND_RESERVE } from "./market.mjs";
 import { checkAll } from "./invariants.mjs";
 
 // A small, legible economy: a producing harbor (cheap sugar + rum) and a flagged
@@ -51,6 +51,10 @@ function stepProducer(a, ctx) {
   let bal = m.balancesOf(a.id);
   if (!bal.sites.includes("sugar") && bal.poe > 400) { try { m.buildSite(a.id, "sugar"); } catch {} }
   if (!bal.stalls.includes("distill") && bal.poe > 400) { try { m.build(a.id, "distill"); } catch {} }
+  // back off when our unsold rum is already resting on the book — don't make what we
+  // can't sell (also keeps the order book bounded over a long run)
+  const restingRum = bal.orders.reduce((s, o) => s + (o.commodity === "rum" && o.side === "sell" ? o.qty : 0), 0);
+  if (restingRum >= 12) return;
   bal = m.balancesOf(a.id);
   // extract sugar (pays the fee — the sink) when feedstock is low
   if ((bal.holdings.sugar || 0) < 3 && bal.poe > EXTRACT_FEE) { try { m.extract(a.id, "sugar"); } catch {} }
@@ -104,13 +108,41 @@ function stepTrader(a, ctx) {
   }
 }
 
+const RAID_PROB = 0.25;   // chance a docked raider engages on a given tick
+const RAID_PLUNDER = 500; // matches PillageRoom's PLUNDER_BOUNTY
+
+// Raider: fights NPC ships for plunder. Drives the battle ECONOMICS directly (the same
+// market primitives hub.concludeBattle uses) rather than a live PillageRoom — so the
+// plunder faucet + salvage + repair/rebuild sinks are all exercised in the sim.
+function stepRaider(a, ctx) {
+  const m = ctx.markets[HOME];
+  const ship = m.balancesOf(a.id).ships[0];
+  if (!ship) { try { m.buyShip(a.id, "sloop"); } catch {} return; } // lost the last fight -> rebuy (sink)
+  if (ship.voyage) return;
+  if (ship.hull < ship.maxHull - 3) { try { m.repairShip(a.id, ship.id); } catch {} } // patch up (sink)
+  if (ctx.rnd() > RAID_PROB) return;
+
+  let enemy;
+  try { enemy = m.spawnRaider("sloop", HOME, { rum: 6, shot: 3 }); } catch { return; }
+  if (ctx.rnd() < 0.7) {                                  // win
+    try { m.award(a.id, RAID_PLUNDER); } catch {}         // plunder faucet (from the bounty reserve)
+    try { m.resolveShip(enemy, 0); } catch {}             // enemy sunk -> salvageable wreck here
+    try { m.resolveShip(ship.id, Math.max(1, ship.hull - 4)); } catch {} // took damage
+    for (const c of ["rum", "shot"]) { try { m.salvage(a.id, c, 99); } catch {} } // grab the spoils
+  } else {                                                // loss
+    try { m.resolveShip(ship.id, 0); } catch {}           // own ship sunk (loss-on-sinking)
+    try { m.resolveShip(enemy, 0); } catch {}             // clear the enemy off the board
+  }
+}
+
 function metrics(ex, agents, markets) {
   const wealth = agents.map((a) => (ex.accounts.has(a.id) ? ex.poeOf(a.id) : 0));
   const playerPoE = wealth.reduce((s, w) => s + w, 0);
   const crown = ex.accounts.has("crown") ? ex.poeOf("crown") : 0;
   const flags = FLAGS.reduce((s, f) => s + (ex.accounts.has(f) ? ex.poeOf(f) : 0), 0);
   const rumPx = markets[MARKET].depth("rum").last || markets[HOME].depth("rum").last;
-  return { playerPoE, crown, flags, rumPx, gini: Number(gini(wealth).toFixed(3)), trades: ex.trades.length };
+  const rumHome = markets[HOME].depth("rum").last;
+  return { playerPoE, crown, flags, rumPx, rumHome, gini: Number(gini(wealth).toFixed(3)), trades: ex.trades.length };
 }
 
 // Run the simulation. Returns { history, ex, agents, violation } where history is one
@@ -120,6 +152,7 @@ export function runSim(opts = {}) {
   const ticksPerEpoch = opts.ticksPerEpoch ?? 40;
   const nProducers = opts.producers ?? 5;
   const nTraders = opts.traders ?? 5;
+  const nRaiders = opts.raiders ?? 0; // off by default so the health test population is unchanged
   const dtMs = opts.dtMs ?? 5000;
   const rnd = makeRng(opts.seed ?? 1234);
 
@@ -136,6 +169,7 @@ export function runSim(opts = {}) {
   const agents = [];
   for (let i = 0; i < nProducers; i++) agents.push({ id: `prod${i}`, role: "producer", loc: HOME });
   for (let i = 0; i < nTraders; i++) agents.push({ id: `trad${i}`, role: "trader", loc: HOME, phase: "buy" });
+  for (let i = 0; i < nRaiders; i++) agents.push({ id: `raid${i}`, role: "raider", loc: HOME });
   for (const a of agents) {
     markets[HOME].join(a.id); // purse + starter goods + a sloop at HOME
     a.shipId = markets[HOME].balancesOf(a.id).ships[0].id;
@@ -148,7 +182,8 @@ export function runSim(opts = {}) {
     for (let t = 0; t < ticksPerEpoch; t++) {
       clock += dtMs;
       for (const a of agents) {
-        try { (a.role === "producer" ? stepProducer : stepTrader)(a, { markets, rnd, now }); }
+        const step = a.role === "producer" ? stepProducer : a.role === "trader" ? stepTrader : stepRaider;
+        try { step(a, { markets, rnd, now }); }
         catch { /* an agent's action was invalid for the current state — skip */ }
       }
       markets[MARKET].restockDemand(); // keep a standing buyer so trade doesn't deadlock
@@ -167,13 +202,48 @@ export function runSim(opts = {}) {
   return { history, ex, agents, violation };
 }
 
-// --- CLI: print a per-epoch metrics table ---
+// --- CLI: node sim.mjs [epochs ticksPerEpoch producers traders raiders seed] ---
+// Long-horizon report: the player money-supply curve, drift, price stability, the
+// faucet/sink breakdown, and any invariant failure.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const { history, ex, violation } = runSim({});
-  console.table(history.map((h) => ({
-    epoch: h.epoch, playerPoE: h.playerPoE, crown: h.crown, flags: h.flags,
-    rumPx: h.rumPx, gini: h.gini, volume: h.volume,
-  })));
-  console.log(`\ntotalPoE ${ex.totalPoe()} === minted ${ex.minted}: ${ex.totalPoe() === ex.minted}`);
+  const n = (i, d) => (process.argv[i] !== undefined ? Number(process.argv[i]) : d);
+  const cfg = { epochs: n(2, 250), ticksPerEpoch: n(3, 100), producers: n(4, 6), traders: n(5, 6), raiders: n(6, 3), seed: n(7, 1234) };
+  const totalTicks = cfg.epochs * cfg.ticksPerEpoch;
+  console.log(`sim: ${cfg.producers} producers + ${cfg.traders} traders + ${cfg.raiders} raiders, ${cfg.epochs} epochs x ${cfg.ticksPerEpoch} ticks = ${totalTicks} ticks (seed ${cfg.seed})\n`);
+
+  const { history, ex, violation } = runSim(cfg);
+  const H = history.length;
+  const at = (h) => ({ epoch: h.epoch, playerPoE: h.playerPoE, crown: h.crown, flags: h.flags, rumHome: h.rumHome, rumMkt: h.rumPx, gini: h.gini, vol: h.volume });
+  // sample ~20 rows across the run
+  const stride = Math.max(1, Math.floor(H / 20));
+  console.log("money-supply curve (sampled):");
+  console.table(history.filter((_, i) => i % stride === 0 || i === H - 1).map(at));
+
+  // drift: compare average per-epoch growth of playerPoE in the first vs second half
+  const first = history[0].playerPoE, mid = history[Math.floor(H / 2)].playerPoE, last = history[H - 1].playerPoE;
+  const slope1 = (mid - first) / Math.max(1, Math.floor(H / 2));
+  const slope2 = (last - mid) / Math.max(1, H - Math.floor(H / 2));
+  const verdict = Math.abs(slope2) < Math.abs(slope1) * 0.25 ? "FLATTENING (approaching steady state)"
+    : Math.abs(slope2) < Math.abs(slope1) * 0.9 ? "still drifting but decelerating"
+    : slope2 > 0 ? "DRIFTING UP ~linearly (faucets > sinks)" : "DRIFTING DOWN ~linearly (sinks > faucets)";
+  console.log(`\nplayer money supply: start ${first} -> mid ${mid} -> end ${last}`);
+  console.log(`  per-epoch growth: 1st half ${slope1.toFixed(1)}/epoch, 2nd half ${slope2.toFixed(1)}/epoch -> ${verdict}`);
+
+  // price stability (rumPx = last trade at the demand market, rumHome = at the producer port)
+  const px = history.map((h) => h.rumPx).filter((p) => p > 0);
+  const pxH = history.map((h) => h.rumHome).filter((p) => p > 0);
+  console.log(`\nrum @ demand: min ${Math.min(...px)} max ${Math.max(...px)} last ${px.at(-1)}   rum @ home: min ${Math.min(...pxH)} max ${Math.max(...pxH)}  (anchored by seed/demand pricing)`);
+
+  // faucet / sink accounting (from reserve depletion + terminal balances)
+  const reserve = (id, base) => (ex.accounts.has(id) ? base - ex.poeOf(id) : 0);
+  const plunder = reserve("bounty", BOUNTY_RESERVE);
+  const demandPaid = reserve("demand", DEMAND_RESERVE);
+  const crown = ex.accounts.has("crown") ? ex.poeOf("crown") : 0;
+  const flagsHeld = FLAGS.reduce((s, f) => s + (ex.accounts.has(f) ? ex.poeOf(f) : 0), 0);
+  const warchest = ex.accounts.has("warchest") ? ex.poeOf("warchest") : 0;
+  console.log(`\nfaucets into players:  plunder ${plunder}   demand payouts ${demandPaid}`);
+  console.log(`sinks out of players:  crown(burned) ${crown}   flags(locked) ${flagsHeld}   warchest ${warchest}`);
+
+  console.log(`\nconservation: totalPoE ${ex.totalPoe()} === minted ${ex.minted}: ${ex.totalPoe() === ex.minted}`);
   console.log(`invariants: ${violation ? `BROKE at epoch ${violation.epoch}: ${violation.name} (${violation.detail})` : "held every epoch"}`);
 }
