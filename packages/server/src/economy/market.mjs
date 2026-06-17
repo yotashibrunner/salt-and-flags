@@ -207,7 +207,7 @@ export const DEMAND = "demand";              // pre-funded reserve that buys fin
 export const DEMAND_RESERVE = 1_000_000_000; // deep PoE so the faucet never dries up
 export const DEMAND_CAP = 20;                // max units of a good resting in demand per island
 export const FINISHED = new Set(["rum", "sailcloth", "shot"]); // tier "finished" (mirrors @salt/shared)
-export const DEMAND_LEVY_BPS = 2500;         // sink skimmed from demand SALES (the live default; drains the premium NPC demand injects)
+export const DEMAND_LEVY_BPS = 2700; // sink skimmed from demand SALES
 export const RAIDER = "raider";              // owner of NPC enemy ships spawned for battles
 
 // Burn every unit the demand reserve just bought: settle deposited it into
