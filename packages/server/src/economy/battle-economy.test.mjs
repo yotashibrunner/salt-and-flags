@@ -37,12 +37,12 @@ test("winning a battle: enemy sunk into a salvageable wreck + plunder to the vic
   const raider = m.spawnRaider("sloop", "isleA", { rum: 10, shot: 5 });
   const poe0 = m.balancesOf("cap").poe;
 
-  // outcome of a player win (what hub.concludeBattle("player", ...) applies):
-  m.award("cap", 500);          // plunder
-  m.resolveShip(raider, 0);     // sink the raider -> wreck at isleA
+  // outcome of a PvE win (what hub.concludeBattle("player", ...) applies):
+  const paid = m.pvePlunder("cap"); // PvE plunder from the capped prize pool (- crown cut)
+  m.resolveShip(raider, 0);          // sink the raider -> wreck at isleA
 
   assert.equal(ex.ships.has(raider), false, "raider sunk");
-  assert.equal(m.balancesOf("cap").poe, poe0 + 500, "plunder paid");
+  assert.ok(paid > 0 && m.balancesOf("cap").poe > poe0, "plunder paid from the pool");
   assert.equal(m.wreckHere().rum, Math.floor(10 * SALVAGE_BPS / 10000), "enemy rum salvageable");
   assert.equal(m.wreckHere().shot, Math.floor(5 * SALVAGE_BPS / 10000), "enemy shot salvageable");
   // the victor can recover the spoils
@@ -76,7 +76,7 @@ test("raider spawn + its defeat survive a restart", async () => {
   m.seedLiquidity(); await m.flush();
   m.join("cap"); await m.flush();
   const raider = m.spawnRaider("sloop", "isleA", { rum: 10 }); await m.flush();
-  m.award("cap", 500); await m.flush();
+  m.pvePlunder("cap"); await m.flush();
   m.resolveShip(raider, 0); await m.flush(); // defeat it -> wreck
 
   const ex2 = new Exchange();

@@ -21,12 +21,12 @@ const TERMINAL_SINKS = new Set([CROWN, "warchest"]); // accounts that only ever 
 // TRANSFER: PoE moves between player-controlled accounts (net money unchanged).
 // Next slice: assert every system-touching pair's reason is in FAUCET ∪ SINK and
 // that ΔtotalPoe over a window == Σfaucet − Σsink.
-export const FAUCET_REASONS = new Set(["plunder"]);
-export const SINK_REASONS = new Set(["conquest", "upkeep", "fee", "repair", "extract", "demand_levy", "shipyard", "blockade"]);
+export const FAUCET_REASONS = new Set(["plunder"]); // PvE prize pool -> player
+export const SINK_REASONS = new Set(["conquest", "upkeep", "fee", "repair", "extract", "demand_levy", "shipyard", "blockade", "letter_of_marque"]);
 export const TRANSFER_REASONS = new Set([
   "escrow_buy", "fill", "price_improve_refund", "cancel_refund",
   "stall_levy", "trade_tax", "flag_payout", "flag_levy", "site_levy",
-  "crew_deposit", "crew_withdraw",
+  "crew_deposit", "crew_withdraw", "pvp_plunder",
 ]);
 // Every PoE movement must carry one of these reasons — the reframe seam: a new
 // faucet/sink (e.g. upkeep, repair, fees) is added by labeling it here, and

@@ -135,20 +135,65 @@ function applyExtract(ex, owner, island, commodity, fee, flag, now) {
   ex.labor.set(owner, { amount: have - EXTRACT_LABOR, ts: now });
 }
 
-// --- plunder: the combat subsystem awards battle winnings into a market wallet ---
-export const BOUNTY = "bounty"; // pre-funded reserve representing sea spoils / enemy holds
-export const BOUNTY_RESERVE = 1_000_000_000;
+// --- plunder: combat MOVES wealth, it doesn't mint it. PvP loots the defeated player
+// (their cargo + a share of coin — a zero-sum TRANSFER); PvE pays from a CAPPED, rate-
+// limited prize pool (a controlled FAUCET, not the old infinite reserve); both pay a
+// letter-of-marque cut to the crown (a SINK), so combat is net-neutral-to-deflationary. ---
+export const PRIZE = "prize";          // capped, drainable PvE prize pool (replaced the infinite bounty)
+export const PRIZE_RESERVE = 20_000;   // starting pool
+export const PRIZE_REGEN = 6;          // PoE refilled per SECOND of game time (the rate-limited PvE faucet)
+export const PRIZE_CAP = 20_000;       // the pool never refills above this
+export const PVE_PLUNDER = 80;         // coin a PvE win draws from the pool (capped by the pool)
+export const PVP_COIN_BPS = 3000;      // share of a defeated PLAYER's coin the victor takes (a transfer)
+export const PLUNDER_CROWN_BPS = 1500; // letter-of-marque cut of plunder coin -> crown (a SINK)
 
-// Pay `amount` of plunder to `playerId` from the bounty reserve (PoE-conserving
-// transfer, audited). Used live AND on replay. Creates the reserve (a faucet, like
-// the NPC) on first use; assumes the player account already exists (the hub joins
-// them first), with a 0-balance fallback for safety.
-function applyAward(ex, playerId, amount) {
-  if (!ex.accounts.has(BOUNTY)) ex.createAccount(BOUNTY, BOUNTY_RESERVE);
+// Skim the letter-of-marque fee from a plunder payout (player -> crown, a terminal SINK).
+function plunderCrownCut(ex, playerId, gross) {
+  const cut = Math.floor((gross * PLUNDER_CROWN_BPS) / 10000);
+  if (cut <= 0) return 0;
+  if (!ex.accounts.has(CROWN)) ex.createAccount(CROWN, 0);
+  ex.accounts.get(playerId).poe -= cut;
+  ex.accounts.get(CROWN).poe += cut;
+  ex.ledger.postPair(playerId, CROWN, cut, "letter_of_marque");
+  return cut;
+}
+
+// PvE plunder: lazily refill the prize pool from elapsed game time (the rate-limited
+// faucet — new PoE, capped at PRIZE_CAP), then pay the winner from it and skim the crown
+// cut. Capped by the pool, so no number of wins extracts faster than the pool refills.
+// Used live AND on replay (the win's timestamp rides on the intent).
+function applyPvePlunder(ex, playerId, now) {
+  if (!ex.accounts.has(PRIZE)) { ex.createAccount(PRIZE, PRIZE_RESERVE); ex.prizeTs = now; }
   if (!ex.accounts.has(playerId)) ex.createAccount(playerId, 0);
-  ex.accounts.get(BOUNTY).poe -= amount;
-  ex.accounts.get(playerId).poe += amount;
-  ex.ledger.postPair(BOUNTY, playerId, amount, "plunder");
+  const pool = ex.accounts.get(PRIZE);
+  const refill = Math.min(PRIZE_CAP - pool.poe, Math.max(0, Math.floor((now - (ex.prizeTs ?? now)) / 1000)) * PRIZE_REGEN);
+  if (refill > 0) { pool.poe += refill; ex.minted += refill; } // the faucet: new money into the pool
+  ex.prizeTs = now;
+  const gross = Math.min(PVE_PLUNDER, pool.poe);
+  if (gross <= 0) return 0;
+  pool.poe -= gross; ex.accounts.get(playerId).poe += gross;
+  ex.ledger.postPair(PRIZE, playerId, gross, "plunder"); // FAUCET (pool -> player)
+  plunderCrownCut(ex, playerId, gross);                   // SINK
+  return gross;
+}
+
+// PvP plunder: the victor loots the defeated PLAYER — the loser's hold cargo to the
+// victor's warehouse here, plus a share of their coin (zero-sum TRANSFER), minus the crown
+// cut (SINK). No minting — piracy moves wealth. Used live AND on replay.
+function applyPvpPlunder(ex, winnerId, island, loserId, loserShipId, coinBps) {
+  const hold = ex.accounts.get(`hold:${loserShipId}`);
+  if (hold) {
+    const w = ex._inv(ex.whId(winnerId, island));
+    for (const c of Object.keys(hold.inv)) { const q = hold.inv[c]; if (q > 0) { hold.inv[c] = 0; w.inv[c] = (w.inv[c] || 0) + q; } }
+  }
+  const loser = ex.accounts.get(loserId);
+  const take = loser ? Math.floor((loser.poe * coinBps) / 10000) : 0;
+  if (take > 0) {
+    loser.poe -= take;
+    ex.accounts.get(winnerId).poe += take;
+    ex.ledger.postPair(loserId, winnerId, take, "pvp_plunder"); // TRANSFER (loser -> victor)
+    plunderCrownCut(ex, winnerId, take);                         // SINK
+  }
 }
 
 // --- NPC finished-goods demand: the closing end of the production loop ---
@@ -351,7 +396,7 @@ export const UPKEEP_SITE = 4;             // PoE per cycle per extraction site o
 
 // Accounts that are part of the system plumbing, not a player's holdings. They never
 // pay fees/upkeep, and the flag-share of a drain is never routed back into one.
-const SYSTEM_ACCOUNTS = new Set(["ESCROW", "npc", DEMAND, BOUNTY, WARCHEST, CROWN, UNCLAIMED_TREASURY, RAIDER, ...FLAGS]);
+const SYSTEM_ACCOUNTS = new Set(["ESCROW", "npc", DEMAND, PRIZE, WARCHEST, CROWN, UNCLAIMED_TREASURY, RAIDER, ...FLAGS]);
 export function isSystemOwner(id) { return SYSTEM_ACCOUNTS.has(id); }
 
 // Charge `amount` PoE from `payer` as a SINK, clamped to what they hold (soft model —
@@ -897,12 +942,21 @@ export class Market {
     return per;
   }
 
-  // Award battle plunder to a player (from the bounty reserve). Recorded as an
-  // 'award' intent so a restart replays the winnings. Called by the pillage hook.
-  award(playerId, amount) {
+  // PvE plunder: pay a winner from the capped prize pool (a controlled faucet) + crown
+  // cut. Recorded as a 'plunder' intent (timestamp drives the deterministic pool refill).
+  pvePlunder(playerId) {
+    const ts = this._now();
     const lLen = this.ex.ledger.entries.length, tLen = this.ex.trades.length;
-    applyAward(this.ex, playerId, amount);
-    if (this.store) { this._record({ kind: "award", owner: playerId, amount }); this._captureAudit(lLen, tLen); }
+    const paid = applyPvePlunder(this.ex, playerId, ts);
+    if (this.store) { this._record({ kind: "plunder", owner: playerId, ts }); this._captureAudit(lLen, tLen); }
+    return paid;
+  }
+  // PvP plunder: the victor loots the defeated player's cargo + a share of coin (transfer)
+  // minus the crown cut (sink). Recorded as a 'pvp_plunder' intent.
+  pvpPlunder(winnerId, loserId, loserShipId, island = this.island) {
+    const lLen = this.ex.ledger.entries.length, tLen = this.ex.trades.length;
+    applyPvpPlunder(this.ex, winnerId, island, loserId, loserShipId, PVP_COIN_BPS);
+    if (this.store) { this._record({ kind: "pvp_plunder", winner: winnerId, loser: loserId, ship: loserShipId, island }); this._captureAudit(lLen, tLen); }
   }
 
   // Run a production recipe at YOUR stall on this island: burn inputs + labor, mint
@@ -1257,7 +1311,8 @@ export function replay(ex, intents) {
     else if (it.kind === "pledge") applyPledge(ex, it.owner, it.flag);
     else if (it.kind === "payout") applyPayout(ex, it.flag);
     else if (it.kind === "seize") applySeize(ex, it.owner, it.island, it.flag, it.cost ?? CONQUEST_COST);
-    else if (it.kind === "award") applyAward(ex, it.owner, it.amount);
+    else if (it.kind === "plunder") applyPvePlunder(ex, it.owner, it.ts ?? 0);
+    else if (it.kind === "pvp_plunder") applyPvpPlunder(ex, it.winner, it.island, it.loser, it.ship, PVP_COIN_BPS);
     else if (it.kind === "produce") applyProduce(ex, it.owner, it.recipe, it.island, it.ts ?? 0);
   }
   return ex;

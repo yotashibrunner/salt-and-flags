@@ -21,8 +21,13 @@ export const BLOCKADE_STEP: number;
 export const BLOCKADE_LABOR: number;
 export const BLOCKADE_BATTLE_STEP: number;
 export const FLAGS: string[];
-export const BOUNTY: string;
-export const BOUNTY_RESERVE: number;
+export const PRIZE: string;
+export const PRIZE_RESERVE: number;
+export const PRIZE_REGEN: number;
+export const PRIZE_CAP: number;
+export const PVE_PLUNDER: number;
+export const PVP_COIN_BPS: number;
+export const PLUNDER_CROWN_BPS: number;
 export const SHIP_CARGO: Record<string, number>;
 export const DEMAND: string;
 export const DEMAND_RESERVE: number;
@@ -89,7 +94,8 @@ export type Intent =
   | { seq: number; kind: "pledge"; owner: string; flag: string }
   | { seq: number; kind: "payout"; flag: string }
   | { seq: number; kind: "seize"; owner: string; island: string; flag: string; cost: number }
-  | { seq: number; kind: "award"; owner: string; amount: number }
+  | { seq: number; kind: "plunder"; owner: string; ts: number }
+  | { seq: number; kind: "pvp_plunder"; winner: string; loser: string; ship: string; island: string }
   | { seq: number; kind: "upkeep"; owner: string; island: string; amount: number; flag: string | null; ts: number }
   | { seq: number; kind: "repair"; owner: string; ship: string; flag: string | null }
   | { seq: number; kind: "hull"; ship: string; hull: number }
@@ -204,7 +210,8 @@ export class Market {
   pushBlockade(playerId: string): void;
   defendBlockade(playerId: string): void;
   battlePush(playerId: string, island?: string): "attack" | "defend" | null;
-  award(playerId: string, amount: number): void;
+  pvePlunder(playerId: string): number;
+  pvpPlunder(winnerId: string, loserId: string, loserShipId: string, island?: string): void;
   payout(playerId: string): number;
   produce(playerId: string, recipeId: string): Recipe;
   cancel(playerId: string, orderId: number): string | null;

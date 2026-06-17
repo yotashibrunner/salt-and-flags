@@ -9,7 +9,7 @@
 // tells us). A module singleton (set in index.ts) lets each MarketRoom reach it.
 // ============================================================================
 import { Exchange } from "./economy.mjs";
-import { Market, replay, seededIslandsFrom, LISTING_FEE_BPS, DEMAND_LEVY_BPS } from "./market.mjs";
+import { Market, replay, seededIslandsFrom, LISTING_FEE_BPS, DEMAND_LEVY_BPS, isSystemOwner } from "./market.mjs";
 import type { Store } from "./market.mjs";
 import type { IslandInfo } from "../world/registry.js";
 
@@ -31,11 +31,11 @@ export class MarketHub {
     return this.system;
   }
 
-  // Pay battle plunder into a player's market wallet (ensuring they have one).
-  async award(playerId: string, amount: number) {
+  // Pay PvE battle plunder into a player's wallet from the capped prize pool.
+  async plunder(playerId: string) {
     const s = this.sys();
-    s.join(playerId); // give a fresh player normal starting balances before plunder
-    s.award(playerId, amount);
+    s.join(playerId); // give a fresh player normal starting balances first
+    s.pvePlunder(playerId);
     await s.flush();
   }
 
@@ -66,16 +66,20 @@ export class MarketHub {
   // the player ship is sunk (loss-on-sinking). All conserving + persisted.
   async concludeBattle(
     winner: "player" | "enemy",
-    opts: { playerShipId?: string; playerHull?: number; enemyShipId?: string; plunderTo?: string[]; plunder?: number; island?: string },
+    opts: { playerShipId?: string; playerHull?: number; enemyShipId?: string; plunderTo?: string[]; island?: string },
   ) {
     const s = this.sys();
     if (winner === "player") {
+      // is the defeated ship another player's (PvP) or an NPC raider's (PvE)?
+      const loserOwner = opts.enemyShipId ? this.ex.ships?.get(opts.enemyShipId)?.owner : undefined;
+      const pvp = !!loserOwner && !isSystemOwner(loserOwner) && !!opts.enemyShipId;
       for (const p of opts.plunderTo ?? []) {
         s.join(p);
-        s.award(p, opts.plunder ?? 0);
+        if (pvp) s.pvpPlunder(p, loserOwner!, opts.enemyShipId!, opts.island); // loot the loser (transfer)
+        else s.pvePlunder(p);                                                   // capped prize pool (faucet)
         if (opts.island) s.battlePush(p, opts.island); // a win in contested waters advances your blockade
       }
-      if (opts.enemyShipId) s.resolveShip(opts.enemyShipId, 0);
+      if (opts.enemyShipId) s.resolveShip(opts.enemyShipId, 0); // sink the loser (PvP cargo already looted)
       if (opts.playerShipId) s.resolveShip(opts.playerShipId, opts.playerHull ?? 0);
     } else if (opts.playerShipId) {
       s.resolveShip(opts.playerShipId, 0);

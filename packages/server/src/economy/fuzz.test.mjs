@@ -144,7 +144,7 @@ test("invariant fuzz: random ops across islands/players never break conservation
         case "pledge": m.pledge(p, pick(rnd, ["wardens", "gulls"])); break;
         case "seize": m.seize(p, pick(rnd, ["wardens", "gulls"])); break;
         case "payout": m.payout(p); break;
-        case "award": m.award(p, 1 + ((rnd() * 200) | 0)); break;
+        case "award": m.pvePlunder(p); break; // PvE plunder from the capped prize pool
         case "restock": m.restockDemand(); break;
         case "upkeep": m.tickUpkeep(); break;
         case "repair": {

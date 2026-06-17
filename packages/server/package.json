@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "migrate": "tsx src/db.ts migrate",
-    "test": "node --test src/identity.test.mjs src/economy/economy.test.mjs src/economy/market.test.mjs src/economy/persistence.test.mjs src/economy/demand.test.mjs src/economy/sinks.test.mjs src/economy/fuzz.test.mjs src/economy/extract.test.mjs src/economy/shipyard.test.mjs src/economy/sailing.test.mjs src/economy/salvage.test.mjs src/economy/battle-economy.test.mjs src/economy/crew.test.mjs src/economy/blockade.test.mjs src/economy/name.test.mjs src/economy/sim.test.mjs src/pillage/battle.test.mjs",
+    "test": "node --test src/identity.test.mjs src/economy/economy.test.mjs src/economy/market.test.mjs src/economy/persistence.test.mjs src/economy/demand.test.mjs src/economy/sinks.test.mjs src/economy/fuzz.test.mjs src/economy/extract.test.mjs src/economy/shipyard.test.mjs src/economy/sailing.test.mjs src/economy/salvage.test.mjs src/economy/battle-economy.test.mjs src/economy/plunder.test.mjs src/economy/crew.test.mjs src/economy/blockade.test.mjs src/economy/name.test.mjs src/economy/sim.test.mjs src/pillage/battle.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "persist:live": "tsx persist.live.mts",
     "sim": "node src/economy/sim.mjs"

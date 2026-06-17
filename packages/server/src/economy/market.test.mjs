@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Market, NEW_PLAYER_POE, BASE_PRICE, LABOR_START, LABOR_MAX, STALL_COST, UNCLAIMED_TREASURY, CONQUEST_COST, WARCHEST, BOUNTY, BOUNTY_RESERVE } from "./market.mjs";
+import { Market, NEW_PLAYER_POE, BASE_PRICE, LABOR_START, LABOR_MAX, STALL_COST, UNCLAIMED_TREASURY, CONQUEST_COST, WARCHEST, PRIZE, PRIZE_RESERVE, PVE_PLUNDER, PLUNDER_CROWN_BPS, CROWN } from "./market.mjs";
 import { Exchange } from "./economy.mjs";
 
 test("market seeds an NPC book to hit on both sides", () => {
@@ -260,18 +260,18 @@ test("flag conquest: seizing an island reroutes its royalties to the new flag (c
   assert.equal(m.flagTreasury(), Math.floor(bid * 2 * 0.1), "wardens collects the rerouted tax");
 });
 
-test("plunder: an award pays a player from the bounty reserve (conserving transfer)", () => {
+test("plunder: a PvE win pays from the capped prize pool, minus the crown cut", () => {
   const m = new Market("isle", { now: () => 1 });
   m.join("hero");
   const heroPoe = m.balancesOf("hero").poe;
 
-  m.award("hero", 500);                          // creates the reserve + first payout
-  const total1 = m.totalPoe();
-  m.award("hero", 300);                          // now a pure transfer
+  const paid = m.pvePlunder("hero"); // draws PVE_PLUNDER from the pool, skims the letter-of-marque cut
+  const cut = Math.floor((PVE_PLUNDER * PLUNDER_CROWN_BPS) / 10000);
 
-  assert.equal(m.balancesOf("hero").poe, heroPoe + 800, "hero received the plunder");
-  assert.equal(m.ex.poeOf(BOUNTY), BOUNTY_RESERVE - 800, "drawn from the bounty reserve");
-  assert.equal(m.totalPoe(), total1, "the award itself conserves total PoE");
+  assert.equal(paid, PVE_PLUNDER, "gross plunder = PVE_PLUNDER (pool had plenty)");
+  assert.equal(m.balancesOf("hero").poe, heroPoe + PVE_PLUNDER - cut, "hero kept plunder minus the crown cut");
+  assert.equal(m.ex.poeOf(PRIZE), PRIZE_RESERVE - PVE_PLUNDER, "drawn from the prize pool, not an infinite reserve");
+  assert.equal(m.ex.poeOf(CROWN), cut, "the crown took its cut (a sink)");
   assert.equal(m.ex.ledger.sum(), 0, "ledger zero-sum");
 });
 

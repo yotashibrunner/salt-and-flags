@@ -11,7 +11,7 @@
 // ============================================================================
 import { pathToFileURL } from "node:url";
 import { Exchange } from "./economy.mjs";
-import { Market, FLAGS, LISTING_FEE_BPS, DEMAND_LEVY_BPS, EXTRACT_FEE, BOUNTY_RESERVE, DEMAND_RESERVE } from "./market.mjs";
+import { Market, FLAGS, LISTING_FEE_BPS, DEMAND_LEVY_BPS, EXTRACT_FEE, DEMAND_RESERVE, PRIZE_CAP } from "./market.mjs";
 import { checkAll } from "./invariants.mjs";
 
 // A small, legible economy: a producing harbor (cheap sugar + rum) and a flagged
@@ -109,7 +109,6 @@ function stepTrader(a, ctx) {
 }
 
 const RAID_PROB = 0.25;   // chance a docked raider engages on a given tick
-const RAID_PLUNDER = 500; // matches PillageRoom's PLUNDER_BOUNTY
 
 // Raider: fights NPC ships for plunder. Drives the battle ECONOMICS directly (the same
 // market primitives hub.concludeBattle uses) rather than a live PillageRoom — so the
@@ -125,7 +124,7 @@ function stepRaider(a, ctx) {
   let enemy;
   try { enemy = m.spawnRaider("sloop", HOME, { rum: 6, shot: 3 }); } catch { return; }
   if (ctx.rnd() < 0.7) {                                  // win
-    try { m.award(a.id, RAID_PLUNDER); } catch {}         // plunder faucet (from the bounty reserve)
+    try { m.pvePlunder(a.id); } catch {}                  // PvE plunder from the capped prize pool
     try { m.resolveShip(enemy, 0); } catch {}             // enemy sunk -> salvageable wreck here
     try { m.resolveShip(ship.id, Math.max(1, ship.hull - 4)); } catch {} // took damage
     for (const c of ["rum", "shot"]) { try { m.salvage(a.id, c, 99); } catch {} } // grab the spoils
@@ -234,15 +233,19 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const pxH = history.map((h) => h.rumHome).filter((p) => p > 0);
   console.log(`\nrum @ demand: min ${Math.min(...px)} max ${Math.max(...px)} last ${px.at(-1)}   rum @ home: min ${Math.min(...pxH)} max ${Math.max(...pxH)}  (anchored by seed/demand pricing)`);
 
-  // faucet / sink accounting (from reserve depletion + terminal balances)
-  const reserve = (id, base) => (ex.accounts.has(id) ? base - ex.poeOf(id) : 0);
-  const plunder = reserve("bounty", BOUNTY_RESERVE);
-  const demandPaid = reserve("demand", DEMAND_RESERVE);
+  // faucet / sink accounting: sum the ledger by reason (positive deltas = total flowed)
+  const flow = {};
+  for (const e of ex.ledger.entries) if (e.delta > 0) flow[e.reason] = (flow[e.reason] || 0) + e.delta;
+  const plunder = flow["plunder"] || 0;                 // PvE faucet (capped prize pool -> players)
+  const pvp = flow["pvp_plunder"] || 0;                 // PvP transfer (0 in this PvE-only sim)
+  const lom = flow["letter_of_marque"] || 0;            // crown cut on plunder (sink)
+  const demandPaid = ex.accounts.has("demand") ? DEMAND_RESERVE - ex.poeOf("demand") : 0;
   const crown = ex.accounts.has("crown") ? ex.poeOf("crown") : 0;
   const flagsHeld = FLAGS.reduce((s, f) => s + (ex.accounts.has(f) ? ex.poeOf(f) : 0), 0);
-  const warchest = ex.accounts.has("warchest") ? ex.poeOf("warchest") : 0;
-  console.log(`\nfaucets into players:  plunder ${plunder}   demand payouts ${demandPaid}`);
-  console.log(`sinks out of players:  crown(burned) ${crown}   flags(locked) ${flagsHeld}   warchest ${warchest}`);
+  const pool = ex.accounts.has("prize") ? ex.poeOf("prize") : 0;
+  console.log(`\nfaucets into players:  PvE plunder ${plunder}   demand payouts ${demandPaid}   (PvP transfers ${pvp})`);
+  console.log(`sinks out of players:  crown(burned) ${crown}   incl. letter-of-marque ${lom}   flags(locked) ${flagsHeld}`);
+  console.log(`prize pool: ${pool}/${PRIZE_CAP} (PvE faucet is rate-limited by the pool refill)`);
 
   console.log(`\nconservation: totalPoE ${ex.totalPoe()} === minted ${ex.minted}: ${ex.totalPoe() === ex.minted}`);
   console.log(`invariants: ${violation ? `BROKE at epoch ${violation.epoch}: ${violation.name} (${violation.detail})` : "held every epoch"}`);

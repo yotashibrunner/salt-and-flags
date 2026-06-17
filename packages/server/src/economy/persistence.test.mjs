@@ -148,15 +148,15 @@ test("plunder survives a restart", async () => {
   const ex1 = new Exchange();
   const m = new Market("isle", { exchange: ex1, store, nextSeq, now });
   m.join("hero"); await m.flush();
-  m.award("hero", 500); await m.flush();
-  const heroPoe1 = m.balancesOf("hero").poe; // 1000 start + 500 plunder
+  m.pvePlunder("hero"); await m.flush();
+  const heroPoe1 = m.balancesOf("hero").poe; // 1000 start + plunder - crown cut
 
   const ex2 = new Exchange();
   replay(ex2, await store.loadIntents());
   const m2 = new Market("isle", { exchange: ex2, now });
 
   assert.equal(m2.balancesOf("hero").poe, heroPoe1, "plunder replayed");
-  assert.equal(ex2.poeOf("bounty"), ex1.poeOf("bounty"), "bounty reserve preserved");
+  assert.equal(ex2.poeOf("prize"), ex1.poeOf("prize"), "prize pool preserved across the restart");
 });
 
 test("a fresh log replays to an empty (but valid) exchange", () => {

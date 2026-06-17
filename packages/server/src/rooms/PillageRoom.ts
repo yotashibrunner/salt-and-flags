@@ -166,7 +166,6 @@ export class PillageRoom extends Room<BattleState> {
         playerHull: me.hull,
         enemyShipId: this.enemyShipId,
         plunderTo: recipients,
-        plunder: PLUNDER_BOUNTY,
         island: this.island, // a win here advances a blockade on this island, if any
       });
     } catch (e) { console.error("battle outcome persist failed:", e); }
