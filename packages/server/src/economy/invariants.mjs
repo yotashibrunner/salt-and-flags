@@ -11,7 +11,9 @@
 // already first-class today even though we currently only assert zero-sum +
 // minted-accounting, so that reframe is an added assertion over data already flowing.
 // ============================================================================
-import { SHIP_CARGO, DEMAND, FINISHED } from "./market.mjs";
+import { SHIP_CARGO, DEMAND, FINISHED, CROWN } from "./market.mjs";
+
+const TERMINAL_SINKS = new Set([CROWN, "warchest"]); // accounts that only ever receive PoE
 
 // --- ledger reason taxonomy (every postPair reason is classified) ---
 // FAUCET: PoE enters players' hands from a pre-funded reserve.
@@ -20,10 +22,10 @@ import { SHIP_CARGO, DEMAND, FINISHED } from "./market.mjs";
 // Next slice: assert every system-touching pair's reason is in FAUCET ∪ SINK and
 // that ΔtotalPoe over a window == Σfaucet − Σsink.
 export const FAUCET_REASONS = new Set(["plunder"]);
-export const SINK_REASONS = new Set(["conquest"]);
+export const SINK_REASONS = new Set(["conquest", "upkeep", "fee", "repair"]);
 export const TRANSFER_REASONS = new Set([
   "escrow_buy", "fill", "price_improve_refund", "cancel_refund",
-  "stall_levy", "trade_tax", "flag_payout",
+  "stall_levy", "trade_tax", "flag_payout", "flag_levy",
 ]);
 // Every PoE movement must carry one of these reasons — the reframe seam: a new
 // faucet/sink (e.g. upkeep, repair, fees) is added by labeling it here, and
@@ -136,6 +138,17 @@ function I_demandBurns(ex) {
   return null;
 }
 
+// Terminal sinks (crown, warchest) only ever RECEIVE PoE — they never pay out, which
+// is what makes them a real drain on player-held money. Any debit from one is a bug.
+function I_terminalSinks(ex) {
+  for (const e of ex.ledger.entries) {
+    if (TERMINAL_SINKS.has(e.account) && e.delta < 0) {
+      return { name: "terminal_sink", detail: `${e.account} paid out ${-e.delta} (${e.reason}) — sinks never debit` };
+    }
+  }
+  return null;
+}
+
 export const INVARIANTS = [
   I_ledgerZeroSum,
   I_poeAccounted,
@@ -145,6 +158,7 @@ export const INVARIANTS = [
   I_locationIntegrity,
   I_reasonsClassified,
   I_demandBurns,
+  I_terminalSinks,
 ];
 
 // Run every invariant; return the first violation { name, detail } or null.

@@ -48,7 +48,7 @@ export class Ledger {
   sum(): number;
 }
 
-export interface ShipRec { owner: string; cls: string; dockedAt: string; }
+export interface ShipRec { owner: string; cls: string; dockedAt: string; hull: number; maxHull: number; }
 
 export class Exchange {
   accounts: Map<string, Account>;
@@ -60,6 +60,7 @@ export class Exchange {
   mintedUnits: Record<string, number>;    // total units minted via openings + production
   ships?: Map<string, ShipRec>;           // added by the Market layer (located inventory)
   _sid?: number;                          // ship-id counter (Market layer)
+  upkeepTs?: Map<string, number>;         // `${owner}:${island}` -> last upkeep timestamp
 
   createAccount(id: string, poe?: number, inv?: Record<string, number>): Account;
   acct(id: string): Account;

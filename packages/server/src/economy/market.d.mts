@@ -21,6 +21,15 @@ export const DEMAND: string;
 export const DEMAND_RESERVE: number;
 export const DEMAND_CAP: number;
 export const FINISHED: Set<string>;
+export const SHIP_HULL: Record<string, number>;
+export const REPAIR_PER_HULL: number;
+export const CROWN: string;
+export const SINK_BURN_BPS: number;
+export const LISTING_FEE_BPS: number;
+export const UPKEEP_PERIOD_MS: number;
+export const UPKEEP_STALL: number;
+export const UPKEEP_SHIP: number;
+export function isSystemOwner(id: string): boolean;
 
 export interface Recipe {
   id: string;
@@ -36,7 +45,7 @@ export type Intent =
   | { seq: number; kind: "account"; owner: string; poe: number; ts: number }
   | { seq: number; kind: "grant"; owner: string; island: string; inv: Record<string, number> }
   | { seq: number; kind: "ship"; id: string; owner: string; cls: string; dockedAt: string }
-  | { seq: number; kind: "place"; owner: string; island: string; commodity: string; side: Side; price: number; qty: number; flag: string | null; rate: number }
+  | { seq: number; kind: "place"; owner: string; island: string; commodity: string; side: Side; price: number; qty: number; flag: string | null; rate: number; fee: number }
   | { seq: number; kind: "cancel"; ref: number }
   | { seq: number; kind: "load"; owner: string; ship: string; commodity: string; qty: number; island: string }
   | { seq: number; kind: "unload"; owner: string; ship: string; commodity: string; qty: number; island: string }
@@ -46,7 +55,11 @@ export type Intent =
   | { seq: number; kind: "pledge"; owner: string; flag: string }
   | { seq: number; kind: "payout"; flag: string }
   | { seq: number; kind: "seize"; owner: string; island: string; flag: string; cost: number }
-  | { seq: number; kind: "award"; owner: string; amount: number };
+  | { seq: number; kind: "award"; owner: string; amount: number }
+  | { seq: number; kind: "upkeep"; owner: string; island: string; amount: number; flag: string | null; ts: number }
+  | { seq: number; kind: "repair"; owner: string; ship: string; flag: string | null }
+  | { seq: number; kind: "hull"; ship: string; hull: number }
+  | { seq: number; kind: "scuttle"; ship: string };
 
 export interface LedgerRow { account: string; delta: number; reason: string; }
 export interface TradeRow { island: string; commodity: string; price: number; qty: number; buyer: string; seller: string; }
@@ -68,6 +81,7 @@ export interface MarketOptions {
   demands?: string[];
   flag?: string | null;       // island's controlling flag (levy + tax destination)
   taxRate?: number;           // commerce tax skimmed from sellers (0 = none)
+  listingFeeBps?: number;     // fee on placing an order, in basis points (0 = none)
   seedLevels?: number;
   seedQty?: number;
   exchange?: Exchange;        // shared engine (hub); omit for a standalone market
@@ -89,6 +103,8 @@ export interface ShipBalance {
   cls: string;
   dockedAt: string;
   cargoCap: number;
+  hull: number;
+  maxHull: number;
   hold: Record<string, number>;
 }
 
@@ -137,6 +153,10 @@ export class Market {
   loadCargo(playerId: string, shipId: string, commodity: string, qty: number): void;
   unloadCargo(playerId: string, shipId: string, commodity: string, qty: number): void;
   moveShip(playerId: string, shipId: string, toIsland: string): void;
+  tickUpkeep(now?: number): string[];                 // charge due rent; returns owners charged
+  repairShip(playerId: string, shipId: string): number; // repair at port; returns PoE charged
+  resolveShip(shipId: string, finalHull: number): void; // persist a battle outcome (sink if <=0)
+  shipHull(shipId: string): number;
 
   flush(): Promise<void>;
 

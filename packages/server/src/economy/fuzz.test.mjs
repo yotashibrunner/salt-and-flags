@@ -80,7 +80,7 @@ test("invariant fuzz: random ops across islands/players never break conservation
   };
   const markets = {};
   for (const id of islands) {
-    markets[id] = new Market(id, { exchange: ex, ...cfg[id], nextSeq, now });
+    markets[id] = new Market(id, { exchange: ex, ...cfg[id], listingFeeBps: 100, nextSeq, now });
     markets[id].seedLiquidity();
   }
 
@@ -90,9 +90,12 @@ test("invariant fuzz: random ops across islands/players never break conservation
 
   const rnd = makeRng(987654321);
   const commodities = markets.isleA.commodities;
+  // "sink" (loss-on-sinking) is exercised by sinks.test.mjs; it's left out here so it
+  // doesn't deplete the fleet and starve the cargo/move/repair ops of ships to act on.
   const ops = [
     "buy", "sell", "cancel", "build", "produce",
     "load", "unload", "move", "pledge", "seize", "payout", "award", "restock",
+    "upkeep", "repair", "damage",
   ];
 
   for (let i = 0; i < 4000; i++) {
@@ -132,6 +135,17 @@ test("invariant fuzz: random ops across islands/players never break conservation
         case "payout": m.payout(p); break;
         case "award": m.award(p, 1 + ((rnd() * 200) | 0)); break;
         case "restock": m.restockDemand(); break;
+        case "upkeep": m.tickUpkeep(); break;
+        case "repair": {
+          const sh = m.balancesOf(p).ships.find((s) => s.dockedAt === m.island && s.hull < s.maxHull);
+          if (sh) m.repairShip(p, sh.id);
+          break;
+        }
+        case "damage": {
+          const sh = pick(rnd, m.balancesOf(p).ships);
+          if (sh) m.resolveShip(sh.id, 1 + ((rnd() * sh.maxHull) | 0)); // 1..maxHull -> never sinks here
+          break;
+        }
       }
     } catch {
       // invalid for the current state (insufficient funds/goods, not docked, etc.)

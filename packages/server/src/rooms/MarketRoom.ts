@@ -215,6 +215,17 @@ export class MarketRoom extends Room<MarketState> {
       for (const c of touched) this.syncBook(c);
       this.pushBalances();
     }, 30000);
+
+    // Recurring upkeep: charge rent for stalls on this island + ships docked here
+    // (a SINK that drains the economy's surplus). Lazy/ts-based, so it's safe that
+    // only the rooms with live islands tick. Only refresh clients if anyone paid.
+    this.clock.setInterval(async () => {
+      const charged = this.market.tickUpkeep();
+      if (charged.length === 0) return;
+      await this.market.flush();
+      this.syncFlag(); // the flag's share of upkeep grew its treasury
+      this.pushBalances();
+    }, 60000);
   }
 
   // Stable cross-island identity: the client presents a player id (persisted in

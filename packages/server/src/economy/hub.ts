@@ -9,7 +9,7 @@
 // tells us). A module singleton (set in index.ts) lets each MarketRoom reach it.
 // ============================================================================
 import { Exchange } from "./economy.mjs";
-import { Market, replay, seededIslandsFrom } from "./market.mjs";
+import { Market, replay, seededIslandsFrom, LISTING_FEE_BPS } from "./market.mjs";
 import type { Store } from "./market.mjs";
 import type { IslandInfo } from "../world/registry.js";
 
@@ -39,6 +39,19 @@ export class MarketHub {
     await s.flush();
   }
 
+  // Current hull of a real ship (so a battle can start from its persisted condition).
+  shipHull(shipId: string): number {
+    return this.sys().shipHull(shipId);
+  }
+
+  // Persist a battle's outcome for a real ship: finalHull <= 0 sinks it
+  // (loss-on-sinking — cargo burned, ship removed), otherwise records the damage.
+  async resolveShip(shipId: string, finalHull: number) {
+    const s = this.sys();
+    s.resolveShip(shipId, finalHull);
+    await s.flush();
+  }
+
   // Rebuild all state from the persisted intent log (no-op without a store).
   async init() {
     if (!this.store) return;
@@ -60,6 +73,7 @@ export class MarketHub {
       demands: info.demands,
       flag: info.controllingFlag,
       taxRate: info.taxRate,
+      listingFeeBps: LISTING_FEE_BPS, // the live economy charges a listing fee (a sink)
       nextSeq: () => ++this.seq,
     });
     this.markets.set(info.id, m);

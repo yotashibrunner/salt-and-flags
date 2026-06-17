@@ -51,6 +51,11 @@ export class PillageRoom extends Room<BattleState> {
   maxClients = 16;
   private rigMs = RIG_MS;
   private enemyMoveBudget = MOVES_PER_ROUND;
+  // When a real ship is sailed into the battle, its hull seeds the fight and the
+  // outcome is persisted: a loss SINKS it (cargo burned, ship removed), a win records
+  // the remaining damage. Omitted (the default / tests) => combat has no economy effect.
+  private playerShipId?: string;
+  private enemyShipId?: string;
 
   // Stable identity (shared with the market): plunder is paid to this player id's
   // market wallet, so winning a battle enriches the same captain who trades.
@@ -63,15 +68,19 @@ export class PillageRoom extends Room<BattleState> {
     return (client.auth as { playerId: string }).playerId;
   }
 
-  onCreate(options: { rigMs?: number; enemyMoveBudget?: number; setup?: { player?: ShipSetup; enemy?: ShipSetup } } = {}) {
+  onCreate(options: { rigMs?: number; enemyMoveBudget?: number; playerShipId?: string; enemyShipId?: string; setup?: { player?: ShipSetup; enemy?: ShipSetup } } = {}) {
     this.rigMs = options.rigMs ?? RIG_MS;
     if (options.enemyMoveBudget !== undefined) this.enemyMoveBudget = options.enemyMoveBudget;
+    this.playerShipId = options.playerShipId;
+    this.enemyShipId = options.enemyShipId;
     this.setState(new BattleState());
     // player + enemy placeholders; real matchmaking wires actual ships/crews
     const me = new ShipState(); me.col = 3; me.row = 6; me.heading = 0;  // facing north, toward the foe
     const foe = new ShipState(); foe.col = 3; foe.row = 1; foe.heading = 2; // facing south
     applySetup(me, options.setup?.player);   // test seam: position/hull overrides
     applySetup(foe, options.setup?.enemy);
+    // a real ship brings its persisted hull into the fight
+    if (this.playerShipId) me.hull = getHub().shipHull(this.playerShipId) || me.hull;
     this.state.ships.set("player", me);
     this.state.ships.set("enemy", foe);
 
@@ -148,6 +157,17 @@ export class PillageRoom extends Room<BattleState> {
         catch (e) { console.error("plunder award failed:", e); }
       }
     }
+
+    // Loss-on-sinking / damage: persist the real ships' fates. A defeated ship is
+    // SUNK (its hold cargo burned, the ship removed); a survivor keeps its damage.
+    try {
+      if (this.playerShipId) {
+        const me = this.state.ships.get("player")!;
+        await getHub().resolveShip(this.playerShipId, winner === "player" ? me.hull : 0);
+      }
+      if (this.enemyShipId && winner === "player") await getHub().resolveShip(this.enemyShipId, 0);
+    } catch (e) { console.error("ship outcome persist failed:", e); }
+
     this.broadcast("end", { winner, bounty: winner === "player" ? PLUNDER_BOUNTY : 0, recipients });
   }
 
