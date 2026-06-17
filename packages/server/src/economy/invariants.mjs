@@ -11,7 +11,7 @@
 // already first-class today even though we currently only assert zero-sum +
 // minted-accounting, so that reframe is an added assertion over data already flowing.
 // ============================================================================
-import { SHIP_CARGO } from "./market.mjs";
+import { SHIP_CARGO, DEMAND, FINISHED } from "./market.mjs";
 
 // --- ledger reason taxonomy (every postPair reason is classified) ---
 // FAUCET: PoE enters players' hands from a pre-funded reserve.
@@ -25,6 +25,10 @@ export const TRANSFER_REASONS = new Set([
   "escrow_buy", "fill", "price_improve_refund", "cancel_refund",
   "stall_levy", "trade_tax", "flag_payout",
 ]);
+// Every PoE movement must carry one of these reasons — the reframe seam: a new
+// faucet/sink (e.g. upkeep, repair, fees) is added by labeling it here, and
+// I_reasonsClassified then guarantees no unlabeled PoE flow slips through.
+const KNOWN_REASONS = new Set([...FAUCET_REASONS, ...SINK_REASONS, ...TRANSFER_REASONS]);
 
 function I_ledgerZeroSum(ex) {
   const s = ex.ledger.sum();
@@ -105,6 +109,33 @@ function I_locationIntegrity(ex) {
   return null;
 }
 
+// Every ledger entry carries a classified reason (faucet | sink | transfer). The
+// reframe in action: PoE only ever moves via a labeled flow, so an unlabeled one
+// (a forgotten faucet/sink) fails loudly instead of silently inflating the economy.
+function I_reasonsClassified(ex) {
+  for (const e of ex.ledger.entries) {
+    if (!KNOWN_REASONS.has(e.reason)) {
+      return { name: "reason_classified", detail: `unlabeled ledger reason "${e.reason}"` };
+    }
+  }
+  return null;
+}
+
+// The finished-goods sink actually destroys: the demand reserve never retains the
+// goods it buys (they're burned on fill), so its warehouses hold nothing.
+function I_demandBurns(ex) {
+  const prefix = `wh:${DEMAND}:`;
+  for (const a of ex.accounts.values()) {
+    if (!a.id.startsWith(prefix)) continue;
+    for (const c in a.inv) {
+      if (a.inv[c] !== 0) {
+        return { name: "demand_burns", detail: `${a.id} retains ${a.inv[c]} ${c} — demand goods must be burned${FINISHED.has(c) ? "" : " (and demand shouldn't even buy this)"}` };
+      }
+    }
+  }
+  return null;
+}
+
 export const INVARIANTS = [
   I_ledgerZeroSum,
   I_poeAccounted,
@@ -112,6 +143,8 @@ export const INVARIANTS = [
   I_noNegatives,
   I_escrowIntegrity,
   I_locationIntegrity,
+  I_reasonsClassified,
+  I_demandBurns,
 ];
 
 // Run every invariant; return the first violation { name, detail } or null.

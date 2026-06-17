@@ -17,6 +17,10 @@ export const FLAGS: string[];
 export const BOUNTY: string;
 export const BOUNTY_RESERVE: number;
 export const SHIP_CARGO: Record<string, number>;
+export const DEMAND: string;
+export const DEMAND_RESERVE: number;
+export const DEMAND_CAP: number;
+export const FINISHED: Set<string>;
 
 export interface Recipe {
   id: string;
@@ -111,6 +115,7 @@ export class Market {
 
   seedPrice(commodity: string): number;
   seedLiquidity(levels?: number, qty?: number): void;
+  restockDemand(): string[]; // top up finished-goods demand bids; returns touched commodities
 
   hasPlayer(playerId: string): boolean;
   join(playerId: string): void;

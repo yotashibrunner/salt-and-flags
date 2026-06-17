@@ -204,6 +204,17 @@ export class MarketRoom extends Room<MarketState> {
       this.pushBalances();
       this.syncFlag();
     }, 2000);
+
+    // Finished-goods demand is bounded: refill the burn-bids toward the cap on a slow
+    // tick (recorded as ordinary places, so it persists + replays). Only touches a
+    // book when there was a shortfall, so the intent log grows with trade, not time.
+    this.clock.setInterval(async () => {
+      const touched = this.market.restockDemand();
+      if (touched.length === 0) return;
+      await this.market.flush();
+      for (const c of touched) this.syncBook(c);
+      this.pushBalances();
+    }, 30000);
   }
 
   // Stable cross-island identity: the client presents a player id (persisted in

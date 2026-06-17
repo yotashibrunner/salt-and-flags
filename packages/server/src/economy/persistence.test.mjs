@@ -40,7 +40,10 @@ test("state survives a restart: replaying the intent log rebuilds identical book
 
   // --- live session 1: seed, two players, a crossing trade, a rest + cancel ---
   const ex1 = new Exchange();
-  const m = new Market(island, { exchange: ex1, store, produces: ["iron"], demands: ["rum"], flag: "wardens", taxRate: 0.05, nextSeq, now });
+  // demands planks (a refined good) not rum: this test needs an untouched rum book to
+  // rest a player order inside the NPC spread, and finished-goods demand now seats a
+  // burn-bid at the demand price. Demand-on-rum is covered by demand.test.mjs.
+  const m = new Market(island, { exchange: ex1, store, produces: ["iron"], demands: ["planks"], flag: "wardens", taxRate: 0.05, nextSeq, now });
   m.seedLiquidity(); await m.flush();
   m.join("p1"); await m.flush();
   m.join("p2"); await m.flush();

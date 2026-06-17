@@ -92,7 +92,7 @@ test("invariant fuzz: random ops across islands/players never break conservation
   const commodities = markets.isleA.commodities;
   const ops = [
     "buy", "sell", "cancel", "build", "produce",
-    "load", "unload", "move", "pledge", "seize", "payout", "award",
+    "load", "unload", "move", "pledge", "seize", "payout", "award", "restock",
   ];
 
   for (let i = 0; i < 4000; i++) {
@@ -131,6 +131,7 @@ test("invariant fuzz: random ops across islands/players never break conservation
         case "seize": m.seize(p, pick(rnd, ["wardens", "gulls"])); break;
         case "payout": m.payout(p); break;
         case "award": m.award(p, 1 + ((rnd() * 200) | 0)); break;
+        case "restock": m.restockDemand(); break;
       }
     } catch {
       // invalid for the current state (insufficient funds/goods, not docked, etc.)
