@@ -19,10 +19,14 @@ const PLAYER_ID = (() => {
 
 interface Level { price: number; qty: number; }
 interface RestingOrder { id: number; commodity: string; side: "buy" | "sell"; price: number; qty: number; }
-interface Balances { poe: number; labor: number; holdings: Record<string, number>; orders: RestingOrder[]; stalls: string[]; pledged: boolean; myFlags: string[]; }
+interface ShipBalance { id: string; cls: string; dockedAt: string | null; voyage: { from: string; to: string; arriveAt: number } | null; cargoCap: number; hull: number; maxHull: number; hold: Record<string, number>; }
+interface Balances { poe: number; labor: number; holdings: Record<string, number>; orders: RestingOrder[]; stalls: string[]; sites: string[]; wreck: Record<string, number>; ships: ShipBalance[]; pledged: boolean; myFlags: string[]; }
 interface Recipe { id: string; stall: string; inputs: Record<string, number>; outputs: Record<string, number>; labor: number; }
-interface Hello { playerId: string; island: string; islandName: string; region: string; commodities: string[]; produces: string[]; demands: string[]; recipes: Recipe[]; stallCost: number; flags: string[]; conquestCost: number; }
+interface Hello { playerId: string; island: string; islandName: string; region: string; commodities: string[]; produces: string[]; demands: string[]; recipes: Recipe[]; stallCost: number; flags: string[]; conquestCost: number; shipCargo: Record<string, number>; shipPrice: Record<string, number>; raws: string[]; }
 interface WorldIsland { id: string; name: string; region: string; }
+interface WorldLane { a: string; b: string; dist: number; }
+
+const EMPTY_BALANCES: Balances = { poe: 0, labor: 0, holdings: {}, orders: [], stalls: [], sites: [], wreck: {}, ships: [], pledged: false, myFlags: [] };
 
 const $ = (id: string) => document.getElementById(id)!;
 const islandSel = $("islandsel") as HTMLSelectElement, regionEl = $("region"), meEl = $("me"), msgEl = $("msg");
@@ -32,6 +36,8 @@ const lastEl = $("last"), bidsEl = $("bids"), asksEl = $("asks");
 const priceEl = $("price") as HTMLInputElement, qtyEl = $("qty") as HTMLInputElement;
 const poeEl = $("poe"), laborEl = $("labor"), holdingsEl = $("holdings"), myordersEl = $("myorders");
 const stallsEl = $("stalls"), flagPanelEl = $("flagpanel");
+const fleetEl = $("fleet"), shipyardEl = $("shipyard"), sitesEl = $("sites"), salvageEl = $("salvage");
+const raidBtn = $("raid") as HTMLButtonElement;
 
 const client = new Client(SERVER);
 let room: Room<any> | null = null;
@@ -40,8 +46,13 @@ let recipes: Recipe[] = [];
 let stallCost = 0, conquestCost = 0;
 let flags: string[] = [];
 let produces = new Set<string>(), demands = new Set<string>();
-let balances: Balances = { poe: 0, labor: 0, holdings: {}, orders: [], stalls: [], pledged: false, myFlags: [] };
+let raws = new Set<string>();
+let shipCargo: Record<string, number> = {}, shipPrice: Record<string, number> = {};
+let islandName = new Map<string, string>();
+let neighbors = new Map<string, string[]>(); // island -> lane-connected island ids
+let balances: Balances = EMPTY_BALANCES;
 let selected = "";
+let island = ""; // the island this room is for
 
 function flash(text: string, isError = true) {
   msgEl.textContent = text;
@@ -118,10 +129,80 @@ function renderStalls() {
   }
 }
 
+function renderFleet() {
+  const ships = balances.ships ?? [];
+  fleetEl.innerHTML = ships.length ? ships.map((s) => {
+    const fill = Object.values(s.hold).reduce((a, b) => a + b, 0);
+    const where = s.voyage ? `⛵ at sea → ${islandName.get(s.voyage.to) ?? s.voyage.to}`
+      : s.dockedAt === island ? "⚓ docked here"
+      : `⚓ at ${islandName.get(s.dockedAt ?? "") ?? s.dockedAt}`;
+    const hereDocked = !s.voyage && s.dockedAt === island;
+    const nbrs = neighbors.get(island) ?? [];
+    const sail = hereDocked && nbrs.length
+      ? `<select data-dest="${s.id}">${nbrs.map((n) => `<option value="${n}">${islandName.get(n) ?? n}</option>`).join("")}</select><button data-sail="${s.id}">Sail</button>`
+      : "";
+    const cargo = hereDocked
+      ? `<button data-load="${s.id}">Load ${selected}×${qtyEl.value}</button><button data-unload="${s.id}">Unload ${selected}×${qtyEl.value}</button>`
+      : "";
+    return `<div class="stall">
+      <div class="name">${s.cls} · hull ${s.hull}/${s.maxHull} · ${where}</div>
+      <div class="io">hold ${fill}/${s.cargoCap}: ${fmt(s.hold) || "empty"}</div>
+      <div class="row" style="flex-wrap:wrap">${cargo} ${sail}</div>
+    </div>`;
+  }).join("") : `<div class="stall"><div class="name">No ships</div><div class="io">Buy one at the shipyard.</div></div>`;
+
+  for (const b of Array.from(fleetEl.querySelectorAll<HTMLButtonElement>("button[data-load]")))
+    b.onclick = () => room?.send("load", { shipId: b.dataset.load, commodity: selected, qty: Number(qtyEl.value) });
+  for (const b of Array.from(fleetEl.querySelectorAll<HTMLButtonElement>("button[data-unload]")))
+    b.onclick = () => room?.send("unload", { shipId: b.dataset.unload, commodity: selected, qty: Number(qtyEl.value) });
+  for (const b of Array.from(fleetEl.querySelectorAll<HTMLButtonElement>("button[data-sail]"))) {
+    const sel = fleetEl.querySelector<HTMLSelectElement>(`select[data-dest="${b.dataset.sail}"]`);
+    b.onclick = () => room?.send("move", { shipId: b.dataset.sail, toIsland: sel?.value });
+  }
+  renderShipyard();
+}
+
+function renderShipyard() {
+  shipyardEl.innerHTML = Object.entries(shipPrice)
+    .map(([cls, price]) => `<button data-buy="${cls}" ${balances.poe >= price ? "" : "disabled"}>${cls} (${price})</button>`)
+    .join("");
+  for (const b of Array.from(shipyardEl.querySelectorAll<HTMLButtonElement>("button[data-buy]")))
+    b.onclick = () => room?.send("buyShip", { cls: b.dataset.buy });
+}
+
+function renderSites() {
+  const here = commodities.filter((c) => raws.has(c) && produces.has(c));
+  sitesEl.innerHTML = here.length ? here.map((c) => {
+    const owned = balances.sites.includes(c);
+    const action = owned
+      ? `<button class="buy" data-extract="${c}">Extract (labor + fee)</button>`
+      : `<button class="sell" data-buildsite="${c}">Build site</button>`;
+    return `<div class="stall"><div class="name">${c} ${owned ? "✓ site" : ""}</div><div class="io">renewable raw supply</div>${action}</div>`;
+  }).join("") : `<div class="stall"><div class="name">No raw resources here</div></div>`;
+  for (const b of Array.from(sitesEl.querySelectorAll<HTMLButtonElement>("button[data-buildsite]")))
+    b.onclick = () => room?.send("buildSite", { commodity: b.dataset.buildsite });
+  for (const b of Array.from(sitesEl.querySelectorAll<HTMLButtonElement>("button[data-extract]")))
+    b.onclick = () => room?.send("extract", { commodity: b.dataset.extract });
+}
+
+function renderSalvage() {
+  const w = Object.entries(balances.wreck ?? {});
+  salvageEl.innerHTML = w.length
+    ? w.map(([c, q]) => `<button data-salvage="${c}">Salvage ${q} ${c}</button>`).join("")
+    : `<span style="color:#6f8a93">No wrecks washed up here.</span>`;
+  for (const b of Array.from(salvageEl.querySelectorAll<HTMLButtonElement>("button[data-salvage]"))) {
+    const c = b.dataset.salvage!;
+    b.onclick = () => room?.send("salvage", { commodity: c, qty: balances.wreck[c] });
+  }
+}
+
 function renderBalances() {
   poeEl.textContent = String(balances.poe);
   laborEl.textContent = String(balances.labor);
   renderStalls(); // affordability depends on holdings + labor
+  renderSites();  // sites/extract affordability depends on balances
+  renderFleet();  // ships/cargo/voyages + shipyard
+  renderSalvage();
   renderFlag();   // pledged status / payout button depends on balances
   holdingsEl.innerHTML = commodities
     .map((c) => `<div>${c}</div><div style="text-align:right">${balances.holdings[c] ?? 0}</div>`)
@@ -147,7 +228,8 @@ function place(side: "buy" | "sell") {
 
 async function joinIsland(islandId: string) {
   if (room) { try { await room.leave(); } catch { /* ignore */ } room = null; }
-  balances = { poe: 0, labor: 0, holdings: {}, orders: [], stalls: [], pledged: false, myFlags: [] };
+  balances = EMPTY_BALANCES;
+  island = islandId;
   renderBalances();
   try {
     room = await client.joinOrCreate("market", { island: islandId, playerId: PLAYER_ID });
@@ -165,6 +247,10 @@ async function joinIsland(islandId: string) {
     flags = h.flags;
     produces = new Set(h.produces);
     demands = new Set(h.demands);
+    raws = new Set(h.raws ?? []);
+    shipCargo = h.shipCargo ?? {};
+    shipPrice = h.shipPrice ?? {};
+    island = h.island;
     commoditySel.innerHTML = commodities.map((c) => `<option value="${c}">${c}</option>`).join("");
     selected = commodities[0];
     commoditySel.value = selected;
@@ -174,13 +260,25 @@ async function joinIsland(islandId: string) {
   });
   room.onMessage("balances", (b: Balances) => { balances = b; renderBalances(); });
   room.onMessage("error", (e: { message: string }) => flash(e.message));
+  // Going raiding: the server hands back the ship + locale; open the battle screen.
+  room.onMessage("raid:ready", (m: { playerShipId: string; island: string }) => {
+    window.open(`pillage.html?ship=${encodeURIComponent(m.playerShipId)}&island=${encodeURIComponent(m.island)}`, "_blank");
+  });
   room.onStateChange(() => renderBook());
   room.send("sync"); // request initial snapshot now handlers are attached
 }
 
 async function boot() {
-  const world: { islands: WorldIsland[] } = await (await fetch(`${SERVER}/world`)).json();
+  const world: { islands: WorldIsland[]; lanes: WorldLane[] } = await (await fetch(`${SERVER}/world`)).json();
   const islands = world.islands.slice().sort((a, b) => a.name.localeCompare(b.name));
+  islandName = new Map(world.islands.map((i) => [i.id, i.name]));
+  neighbors = new Map();
+  for (const l of world.lanes ?? []) {
+    if (!neighbors.has(l.a)) neighbors.set(l.a, []);
+    if (!neighbors.has(l.b)) neighbors.set(l.b, []);
+    neighbors.get(l.a)!.push(l.b);
+    neighbors.get(l.b)!.push(l.a);
+  }
   islandSel.innerHTML = islands.map((i) => `<option value="${i.id}">${i.name}</option>`).join("");
 
   const wanted = new URLSearchParams(location.search).get("island");
@@ -192,6 +290,7 @@ async function boot() {
   commoditySel.onchange = () => { selected = commoditySel.value; renderTag(); renderBook(); };
   ($("buy") as HTMLButtonElement).onclick = () => place("buy");
   ($("sell") as HTMLButtonElement).onclick = () => place("sell");
+  raidBtn.onclick = () => room?.send("raid");
 
   await joinIsland(start);
 }

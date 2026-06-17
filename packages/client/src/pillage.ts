@@ -123,7 +123,14 @@ function renderPlot() {
 
 async function boot() {
   const client = new Client(SERVER);
-  room = await client.joinOrCreate("pillage", { rigMs: RIG_MS, playerId: PLAYER_ID });
+  // Arriving from "Go raiding" carries the real ship + locale: create a PRIVATE battle
+  // for it (the server spawns an NPC raider and persists the outcome). Without them, the
+  // standalone demo joins a shared sandbox room.
+  const params = new URLSearchParams(location.search);
+  const ship = params.get("ship"), isle = params.get("island");
+  room = ship
+    ? await client.create("pillage", { rigMs: RIG_MS, playerId: PLAYER_ID, playerShipId: ship, island: isle ?? undefined })
+    : await client.joinOrCreate("pillage", { rigMs: RIG_MS, playerId: PLAYER_ID });
 
   room.onStateChange(() => { hud(); if (!animating) draw(); });
   room.onMessage("resolution", (res: any) => { animate(res); });

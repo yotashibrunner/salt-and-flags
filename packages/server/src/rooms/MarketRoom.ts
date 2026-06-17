@@ -17,7 +17,7 @@ import type { Client } from "colyseus";
 const { Room } = colyseusPkg;
 import { Schema, type, MapSchema, ArraySchema } from "@colyseus/schema";
 import type { Market } from "../economy/market.mjs";
-import { STALL_COST, CONQUEST_COST, FLAGS, SHIP_CARGO, SHIP_PRICE } from "../economy/market.mjs";
+import { STALL_COST, CONQUEST_COST, FLAGS, SHIP_CARGO, SHIP_PRICE, RAWS } from "../economy/market.mjs";
 import { getHub } from "../economy/hub.js";
 import { getIsland, laneDist, islandDanger } from "../world/registry.js";
 
@@ -345,6 +345,7 @@ export class MarketRoom extends Room<MarketState> {
       conquestCost: CONQUEST_COST,
       shipCargo: SHIP_CARGO, // cargo capacity per ship class (for the load/sail UI)
       shipPrice: SHIP_PRICE, // shipyard purchase price per class
+      raws: [...RAWS],       // commodities that can be extracted at a site
     });
     this.sendBalances(client);
   }
