@@ -205,6 +205,14 @@ export class MarketRoom extends Room<MarketState> {
       }
     });
 
+    // Go hunting: if the captain has a ship docked here, hand back the config to open a
+    // PillageRoom (which spawns an NPC raider and persists the outcome via the hub).
+    this.onMessage("raid", (client) => {
+      const ship = this.market.balancesOf(this.pid(client)).ships.find((s) => s.dockedAt === this.state.island);
+      if (!ship) { client.send("error", { message: "you need a ship docked here to raid" }); return; }
+      client.send("raid:ready", { playerShipId: ship.id, island: this.state.island });
+    });
+
     // --- cargo: move goods between this port's warehouse and a docked ship's hold,
     // and sail a ship to another port (instant stub). All change located inventory
     // only (no book/PoE), so just resync the acting client's balances. ---

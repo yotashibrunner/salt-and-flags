@@ -52,6 +52,33 @@ export class MarketHub {
     await s.flush();
   }
 
+  // Spawn an NPC enemy ship at `island` with a cargo hold (becomes salvage when sunk).
+  async spawnRaider(island: string, cls = "sloop", cargo: Record<string, number> = { rum: 8, shot: 4 }) {
+    const s = this.sys();
+    const id = s.spawnRaider(cls, island, cargo);
+    await s.flush();
+    return id;
+  }
+
+  // Apply a battle's economic outcome (the PillageRoom calls this when the fight ends).
+  // Player win: pay plunder to each crew member, SINK the enemy raider (its cargo washes
+  // up as a salvageable wreck), and persist the player ship's remaining hull. Enemy win:
+  // the player ship is sunk (loss-on-sinking). All conserving + persisted.
+  async concludeBattle(
+    winner: "player" | "enemy",
+    opts: { playerShipId?: string; playerHull?: number; enemyShipId?: string; plunderTo?: string[]; plunder?: number },
+  ) {
+    const s = this.sys();
+    if (winner === "player") {
+      for (const p of opts.plunderTo ?? []) { s.join(p); s.award(p, opts.plunder ?? 0); }
+      if (opts.enemyShipId) s.resolveShip(opts.enemyShipId, 0);
+      if (opts.playerShipId) s.resolveShip(opts.playerShipId, opts.playerHull ?? 0);
+    } else if (opts.playerShipId) {
+      s.resolveShip(opts.playerShipId, 0);
+    }
+    await s.flush();
+  }
+
   // Rebuild all state from the persisted intent log (no-op without a store).
   async init() {
     if (!this.store) return;

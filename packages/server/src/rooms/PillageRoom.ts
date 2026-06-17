@@ -56,6 +56,7 @@ export class PillageRoom extends Room<BattleState> {
   // the remaining damage. Omitted (the default / tests) => combat has no economy effect.
   private playerShipId?: string;
   private enemyShipId?: string;
+  private island?: string; // where the battle happens (enemy wreck/salvage lands here)
 
   // Stable identity (shared with the market): plunder is paid to this player id's
   // market wallet, so winning a battle enriches the same captain who trades.
@@ -68,19 +69,24 @@ export class PillageRoom extends Room<BattleState> {
     return (client.auth as { playerId: string }).playerId;
   }
 
-  onCreate(options: { rigMs?: number; enemyMoveBudget?: number; playerShipId?: string; enemyShipId?: string; setup?: { player?: ShipSetup; enemy?: ShipSetup } } = {}) {
+  async onCreate(options: { rigMs?: number; enemyMoveBudget?: number; playerShipId?: string; enemyShipId?: string; island?: string; setup?: { player?: ShipSetup; enemy?: ShipSetup } } = {}) {
     this.rigMs = options.rigMs ?? RIG_MS;
     if (options.enemyMoveBudget !== undefined) this.enemyMoveBudget = options.enemyMoveBudget;
     this.playerShipId = options.playerShipId;
     this.enemyShipId = options.enemyShipId;
+    this.island = options.island;
     this.setState(new BattleState());
-    // player + enemy placeholders; real matchmaking wires actual ships/crews
     const me = new ShipState(); me.col = 3; me.row = 6; me.heading = 0;  // facing north, toward the foe
     const foe = new ShipState(); foe.col = 3; foe.row = 1; foe.heading = 2; // facing south
     applySetup(me, options.setup?.player);   // test seam: position/hull overrides
     applySetup(foe, options.setup?.enemy);
     // a real ship brings its persisted hull into the fight
     if (this.playerShipId) me.hull = getHub().shipHull(this.playerShipId) || me.hull;
+    // with a real captain + a locale but no opponent, conjure an NPC raider to fight
+    if (this.playerShipId && !this.enemyShipId && this.island) {
+      this.enemyShipId = await getHub().spawnRaider(this.island);
+      foe.hull = getHub().shipHull(this.enemyShipId) || foe.hull;
+    }
     this.state.ships.set("player", me);
     this.state.ships.set("enemy", foe);
 
@@ -147,26 +153,21 @@ export class PillageRoom extends Room<BattleState> {
     this.state.phase = "end";
     this.state.winner = winner;
 
-    // Economy hook: pay plunder to each winning crew member's MARKET wallet
-    // (a conserving transfer from the bounty reserve, persisted in the ledger).
-    const recipients: string[] = [];
-    if (winner === "player") {
-      const pids = [...new Set(this.clients.map((c) => this.pid(c)))];
-      for (const p of pids) {
-        try { await getHub().award(p, PLUNDER_BOUNTY); recipients.push(p); }
-        catch (e) { console.error("plunder award failed:", e); }
-      }
-    }
-
-    // Loss-on-sinking / damage: persist the real ships' fates. A defeated ship is
-    // SUNK (its hold cargo burned, the ship removed); a survivor keeps its damage.
+    // Economy hook: apply the whole battle outcome through the hub (conserving + persisted):
+    // a win pays plunder to each crew member and SINKS the enemy raider (its cargo washes
+    // up as a salvageable wreck) while keeping the player's damage; a loss sinks the player
+    // ship (loss-on-sinking — cargo burned/salvaged, ship removed).
+    const recipients = winner === "player" ? [...new Set(this.clients.map((c) => this.pid(c)))] : [];
     try {
-      if (this.playerShipId) {
-        const me = this.state.ships.get("player")!;
-        await getHub().resolveShip(this.playerShipId, winner === "player" ? me.hull : 0);
-      }
-      if (this.enemyShipId && winner === "player") await getHub().resolveShip(this.enemyShipId, 0);
-    } catch (e) { console.error("ship outcome persist failed:", e); }
+      const me = this.state.ships.get("player")!;
+      await getHub().concludeBattle(winner === "player" ? "player" : "enemy", {
+        playerShipId: this.playerShipId,
+        playerHull: me.hull,
+        enemyShipId: this.enemyShipId,
+        plunderTo: recipients,
+        plunder: PLUNDER_BOUNTY,
+      });
+    } catch (e) { console.error("battle outcome persist failed:", e); }
 
     this.broadcast("end", { winner, bounty: winner === "player" ? PLUNDER_BOUNTY : 0, recipients });
   }

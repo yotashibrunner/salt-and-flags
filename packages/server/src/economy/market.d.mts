@@ -21,6 +21,7 @@ export const DEMAND: string;
 export const DEMAND_RESERVE: number;
 export const DEMAND_CAP: number;
 export const DEMAND_LEVY_BPS: number;
+export const RAIDER: string;
 export const FINISHED: Set<string>;
 export const SHIP_HULL: Record<string, number>;
 export const REPAIR_PER_HULL: number;
@@ -69,6 +70,7 @@ export type Intent =
   | { seq: number; kind: "site"; owner: string; island: string; commodity: string; to: string }
   | { seq: number; kind: "extract"; owner: string; island: string; commodity: string; fee: number; flag: string | null; ts: number }
   | { seq: number; kind: "salvage"; owner: string; island: string; commodity: string; qty: number }
+  | { seq: number; kind: "raider"; ship: string; cls: string; dockedAt: string; cargo: Record<string, number> }
   | { seq: number; kind: "pledge"; owner: string; flag: string }
   | { seq: number; kind: "payout"; flag: string }
   | { seq: number; kind: "seize"; owner: string; island: string; flag: string; cost: number }
@@ -164,6 +166,7 @@ export class Market {
   buyShip(playerId: string, cls: string): string;
   wreckHere(): Record<string, number>;
   salvage(playerId: string, commodity: string, qty: number): number;
+  spawnRaider(cls: string, dockedAt: string, cargo?: Record<string, number>): string;
   readonly flag: string | null;
   flagTreasury(): number;
   flagMemberCount(): number;

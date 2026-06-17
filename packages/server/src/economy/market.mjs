@@ -163,6 +163,7 @@ export const DEMAND_RESERVE = 1_000_000_000; // deep PoE so the faucet never dri
 export const DEMAND_CAP = 20;                // max units of a good resting in demand per island
 export const FINISHED = new Set(["rum", "sailcloth", "shot"]); // tier "finished" (mirrors @salt/shared)
 export const DEMAND_LEVY_BPS = 2500;         // sink skimmed from demand SALES (the live default; drains the premium NPC demand injects)
+export const RAIDER = "raider";              // owner of NPC enemy ships spawned for battles
 
 // Burn every unit the demand reserve just bought: settle deposited it into
 // wh:demand:island, so remove it there. mintedUnits drops in lockstep (ex.burn), so
@@ -263,7 +264,7 @@ export const UPKEEP_SITE = 4;             // PoE per cycle per extraction site o
 
 // Accounts that are part of the system plumbing, not a player's holdings. They never
 // pay fees/upkeep, and the flag-share of a drain is never routed back into one.
-const SYSTEM_ACCOUNTS = new Set(["ESCROW", "npc", DEMAND, BOUNTY, WARCHEST, CROWN, UNCLAIMED_TREASURY, ...FLAGS]);
+const SYSTEM_ACCOUNTS = new Set(["ESCROW", "npc", DEMAND, BOUNTY, WARCHEST, CROWN, UNCLAIMED_TREASURY, RAIDER, ...FLAGS]);
 export function isSystemOwner(id) { return SYSTEM_ACCOUNTS.has(id); }
 
 // Charge `amount` PoE from `payer` as a SINK, clamped to what they hold (soft model —
@@ -850,6 +851,18 @@ export class Market {
     if (this.store) { this._record({ kind: "extract", owner: playerId, island: this.island, commodity, fee: EXTRACT_FEE, flag: this.flag, ts }); this._captureAudit(lLen, tLen); }
   }
 
+  // Spawn an NPC enemy ship (a "raider") docked here with a cargo hold, for a battle.
+  // Its cargo is minted (a faucet), so defeating it yields salvage (a wreck) when it's
+  // scuttled. Recorded as a `raider` intent. Owned by the system RAIDER account (pays
+  // no fees/upkeep). Returns the new ship id.
+  spawnRaider(cls, dockedAt, cargo = {}) {
+    const shipId = `s${++this.ex._sid}`;
+    applyCreateShip(this.ex, shipId, RAIDER, cls, dockedAt);
+    for (const [c, q] of Object.entries(cargo)) this.ex.mint(`hold:${shipId}`, c, q);
+    if (this.store) this._record({ kind: "raider", ship: shipId, cls, dockedAt, cargo });
+    return shipId;
+  }
+
   // Goods washed up here from sunk ships, available to salvage (commodity -> qty).
   wreckHere() {
     const w = this.ex.accounts.get(`wreck:${this.island}`);
@@ -1025,6 +1038,7 @@ export function replay(ex, intents) {
     else if (it.kind === "site") applyBuildSite(ex, it.owner, it.island, it.commodity, it.to ?? UNCLAIMED_TREASURY);
     else if (it.kind === "extract") applyExtract(ex, it.owner, it.island, it.commodity, it.fee ?? EXTRACT_FEE, it.flag ?? null, it.ts ?? 0);
     else if (it.kind === "salvage") applySalvage(ex, it.owner, it.island, it.commodity, it.qty);
+    else if (it.kind === "raider") { applyCreateShip(ex, it.ship, RAIDER, it.cls, it.dockedAt); for (const [c, q] of Object.entries(it.cargo)) ex.mint(`hold:${it.ship}`, c, q); }
     else if (it.kind === "pledge") applyPledge(ex, it.owner, it.flag);
     else if (it.kind === "payout") applyPayout(ex, it.flag);
     else if (it.kind === "seize") applySeize(ex, it.owner, it.island, it.flag, it.cost ?? CONQUEST_COST);
