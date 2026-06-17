@@ -83,6 +83,17 @@ export class MarketHub {
     await s.flush();
   }
 
+  // Live strategic state for the world map: islands whose control has CHANGED from their
+  // initial flag (conquest / blockade flips), and any active blockades with their meters.
+  // The base geometry + initial flags come from GET /world; this is the overlay.
+  liveControl(): { flags: Record<string, string>; blockades: Array<{ island: string; attacker: string; defender: string | null; meter: number }> } {
+    const flags: Record<string, string> = {};
+    for (const [island, flag] of this.ex.islandFlag ?? []) flags[island] = flag;
+    const blockades: Array<{ island: string; attacker: string; defender: string | null; meter: number }> = [];
+    for (const [island, b] of this.ex.blockades ?? []) blockades.push({ island, attacker: b.attacker, defender: b.defender, meter: b.meter });
+    return { flags, blockades };
+  }
+
   // Rebuild all state from the persisted intent log (no-op without a store).
   async init() {
     if (!this.store) return;

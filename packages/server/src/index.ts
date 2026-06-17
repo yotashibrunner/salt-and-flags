@@ -36,6 +36,8 @@ app.use(express.json());
 
 app.get("/health", (_req, res) => res.json({ ok: true, db: hasDb }));
 app.get("/world", (_req, res) => res.json(world));
+// Live overlay for the map: current control changes + active blockades.
+app.get("/world/state", (_req, res) => res.json(hub.liveControl()));
 
 const server = http.createServer(app);
 const gameServer = new Server({ transport: new WebSocketTransport({ server }) });
