@@ -20,13 +20,14 @@ const PLAYER_ID = (() => {
 interface Level { price: number; qty: number; }
 interface RestingOrder { id: number; commodity: string; side: "buy" | "sell"; price: number; qty: number; }
 interface ShipBalance { id: string; cls: string; dockedAt: string | null; voyage: { from: string; to: string; arriveAt: number } | null; cargoCap: number; hull: number; maxHull: number; hold: Record<string, number>; }
-interface Balances { poe: number; labor: number; holdings: Record<string, number>; orders: RestingOrder[]; stalls: string[]; sites: string[]; wreck: Record<string, number>; ships: ShipBalance[]; pledged: boolean; myFlags: string[]; }
+interface CrewView { id: string; name: string; coffer: number; members: number; captain: boolean; }
+interface Balances { poe: number; labor: number; holdings: Record<string, number>; orders: RestingOrder[]; stalls: string[]; sites: string[]; wreck: Record<string, number>; crews: CrewView[]; ships: ShipBalance[]; pledged: boolean; myFlags: string[]; }
 interface Recipe { id: string; stall: string; inputs: Record<string, number>; outputs: Record<string, number>; labor: number; }
 interface Hello { playerId: string; island: string; islandName: string; region: string; commodities: string[]; produces: string[]; demands: string[]; recipes: Recipe[]; stallCost: number; flags: string[]; conquestCost: number; shipCargo: Record<string, number>; shipPrice: Record<string, number>; raws: string[]; }
 interface WorldIsland { id: string; name: string; region: string; }
 interface WorldLane { a: string; b: string; dist: number; }
 
-const EMPTY_BALANCES: Balances = { poe: 0, labor: 0, holdings: {}, orders: [], stalls: [], sites: [], wreck: {}, ships: [], pledged: false, myFlags: [] };
+const EMPTY_BALANCES: Balances = { poe: 0, labor: 0, holdings: {}, orders: [], stalls: [], sites: [], wreck: {}, crews: [], ships: [], pledged: false, myFlags: [] };
 
 const $ = (id: string) => document.getElementById(id)!;
 const islandSel = $("islandsel") as HTMLSelectElement, regionEl = $("region"), meEl = $("me"), msgEl = $("msg");
@@ -38,6 +39,8 @@ const poeEl = $("poe"), laborEl = $("labor"), holdingsEl = $("holdings"), myorde
 const stallsEl = $("stalls"), flagPanelEl = $("flagpanel");
 const fleetEl = $("fleet"), shipyardEl = $("shipyard"), sitesEl = $("sites"), salvageEl = $("salvage");
 const raidBtn = $("raid") as HTMLButtonElement;
+const crewsEl = $("crews");
+const crewNameEl = $("crewname") as HTMLInputElement, crewJoinIdEl = $("crewjoinid") as HTMLInputElement, crewAmtEl = $("crewamt") as HTMLInputElement;
 
 const client = new Client(SERVER);
 let room: Room<any> | null = null;
@@ -196,6 +199,23 @@ function renderSalvage() {
   }
 }
 
+function renderCrews() {
+  const crews = balances.crews ?? [];
+  crewsEl.innerHTML = crews.length ? crews.map((c) => `
+    <div class="stall">
+      <div class="name">${c.name} ${c.captain ? "· ⚓ captain" : ""}</div>
+      <div class="io">coffer <b>${c.coffer}</b> PoE · ${c.members} crew · id <code>${c.id}</code></div>
+      <div class="row">
+        <button class="sell" data-deposit="${c.id}">Contribute</button>
+        ${c.captain ? `<button class="buy" data-withdraw="${c.id}">Withdraw</button>` : ""}
+      </div>
+    </div>`).join("") : `<div class="stall"><div class="name">Not in a crew</div><div class="io">Form one or join by id.</div></div>`;
+  for (const b of Array.from(crewsEl.querySelectorAll<HTMLButtonElement>("button[data-deposit]")))
+    b.onclick = () => room?.send("crew:deposit", { crewId: b.dataset.deposit, amount: Number(crewAmtEl.value) });
+  for (const b of Array.from(crewsEl.querySelectorAll<HTMLButtonElement>("button[data-withdraw]")))
+    b.onclick = () => room?.send("crew:withdraw", { crewId: b.dataset.withdraw, amount: Number(crewAmtEl.value) });
+}
+
 function renderBalances() {
   poeEl.textContent = String(balances.poe);
   laborEl.textContent = String(balances.labor);
@@ -203,6 +223,7 @@ function renderBalances() {
   renderSites();  // sites/extract affordability depends on balances
   renderFleet();  // ships/cargo/voyages + shipyard
   renderSalvage();
+  renderCrews();
   renderFlag();   // pledged status / payout button depends on balances
   holdingsEl.innerHTML = commodities
     .map((c) => `<div>${c}</div><div style="text-align:right">${balances.holdings[c] ?? 0}</div>`)
@@ -291,6 +312,8 @@ async function boot() {
   ($("buy") as HTMLButtonElement).onclick = () => place("buy");
   ($("sell") as HTMLButtonElement).onclick = () => place("sell");
   raidBtn.onclick = () => room?.send("raid");
+  ($("crewform") as HTMLButtonElement).onclick = () => { if (crewNameEl.value.trim()) room?.send("crew:form", { name: crewNameEl.value.trim() }); };
+  ($("crewjoin") as HTMLButtonElement).onclick = () => { if (crewJoinIdEl.value.trim()) room?.send("crew:join", { crewId: crewJoinIdEl.value.trim() }); };
 
   await joinIsland(start);
 }

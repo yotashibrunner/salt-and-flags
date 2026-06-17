@@ -56,6 +56,8 @@ interface CargoMsg { shipId: string; commodity: string; qty: number; }
 interface MoveMsg { shipId: string; toIsland: string; }
 interface CommodityMsg { commodity: string; }
 interface BuyShipMsg { cls: string; }
+interface FormCrewMsg { name: string; }
+interface CrewMsg { crewId: string; amount?: number; }
 
 export class MarketRoom extends Room<MarketState> {
   maxClients = 64;
@@ -203,6 +205,24 @@ export class MarketRoom extends Room<MarketState> {
       } catch (e) {
         client.send("error", { message: errMsg(e) });
       }
+    });
+
+    // --- crews: form/join a player group + pool PoE in a shared coffer ---
+    this.onMessage<FormCrewMsg>("crew:form", async (client, msg) => {
+      try { this.market.formCrew(this.pid(client), String(msg?.name)); await this.market.flush(); this.pushBalances(); }
+      catch (e) { client.send("error", { message: errMsg(e) }); }
+    });
+    this.onMessage<CrewMsg>("crew:join", async (client, msg) => {
+      try { this.market.joinCrew(this.pid(client), String(msg?.crewId)); await this.market.flush(); this.pushBalances(); }
+      catch (e) { client.send("error", { message: errMsg(e) }); }
+    });
+    this.onMessage<CrewMsg>("crew:deposit", async (client, msg) => {
+      try { this.market.crewDeposit(this.pid(client), String(msg?.crewId), Number(msg?.amount)); await this.market.flush(); this.pushBalances(); }
+      catch (e) { client.send("error", { message: errMsg(e) }); }
+    });
+    this.onMessage<CrewMsg>("crew:withdraw", async (client, msg) => {
+      try { this.market.crewWithdraw(this.pid(client), String(msg?.crewId), Number(msg?.amount)); await this.market.flush(); this.pushBalances(); }
+      catch (e) { client.send("error", { message: errMsg(e) }); }
     });
 
     // Go hunting: if the captain has a ship docked here, hand back the config to open a

@@ -71,6 +71,10 @@ export type Intent =
   | { seq: number; kind: "extract"; owner: string; island: string; commodity: string; fee: number; flag: string | null; ts: number }
   | { seq: number; kind: "salvage"; owner: string; island: string; commodity: string; qty: number }
   | { seq: number; kind: "raider"; ship: string; cls: string; dockedAt: string; cargo: Record<string, number> }
+  | { seq: number; kind: "crew_form"; crew: string; captain: string; name: string }
+  | { seq: number; kind: "crew_join"; crew: string; owner: string }
+  | { seq: number; kind: "crew_deposit"; crew: string; owner: string; amount: number }
+  | { seq: number; kind: "crew_withdraw"; crew: string; owner: string; amount: number }
   | { seq: number; kind: "pledge"; owner: string; flag: string }
   | { seq: number; kind: "payout"; flag: string }
   | { seq: number; kind: "seize"; owner: string; island: string; flag: string; cost: number }
@@ -137,6 +141,7 @@ export interface Balances {
   stalls: string[]; // recipe ids this player owns a stall for on this island
   sites: string[];  // raw commodities this player owns an extraction site for here
   wreck: Record<string, number>; // goods salvageable from sunk ships at this island
+  crews: Array<{ id: string; name: string; coffer: number; members: number; captain: boolean }>; // crews this player is in
   ships: ShipBalance[]; // the captain's whole fleet + each hold's contents
   pledged: boolean; // pledged to this island's controlling flag?
   myFlags: string[]; // every flag this player is pledged to
@@ -167,6 +172,12 @@ export class Market {
   wreckHere(): Record<string, number>;
   salvage(playerId: string, commodity: string, qty: number): number;
   spawnRaider(cls: string, dockedAt: string, cargo?: Record<string, number>): string;
+  formCrew(playerId: string, name: string): string;
+  joinCrew(playerId: string, crewId: string): void;
+  crewDeposit(playerId: string, crewId: string, amount: number): void;
+  crewWithdraw(playerId: string, crewId: string, amount: number): void;
+  crewCofferOf(crewId: string): number;
+  crewsOf(playerId: string): Array<{ id: string; name: string; coffer: number; members: number; captain: boolean }>;
   readonly flag: string | null;
   flagTreasury(): number;
   flagMemberCount(): number;

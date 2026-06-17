@@ -26,6 +26,7 @@ export const SINK_REASONS = new Set(["conquest", "upkeep", "fee", "repair", "ext
 export const TRANSFER_REASONS = new Set([
   "escrow_buy", "fill", "price_improve_refund", "cancel_refund",
   "stall_levy", "trade_tax", "flag_payout", "flag_levy", "site_levy",
+  "crew_deposit", "crew_withdraw",
 ]);
 // Every PoE movement must carry one of these reasons — the reframe seam: a new
 // faucet/sink (e.g. upkeep, repair, fees) is added by labeling it here, and

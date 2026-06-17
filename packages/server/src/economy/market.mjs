@@ -232,6 +232,34 @@ function applyPayout(ex, flag) {
   return per;
 }
 
+// --- crews: player-formed groups with a shared coffer (a `crew:{id}` account). Unlike
+// flags (pre-set factions fed by territory royalties), a crew is an ad-hoc party that
+// pools PoE for joint ventures. Members contribute; the captain withdraws. All movements
+// are conserving transfers player<->coffer (no money created). Used live AND on replay. ---
+function crewCoffer(crewId) { return `crew:${crewId}`; }
+function applyFormCrew(ex, crewId, captain, name) {
+  if (!ex.crews) ex.crews = new Map();
+  ex.crews.set(crewId, { name, captain, members: new Set([captain]) });
+  if (!ex.accounts.has(crewCoffer(crewId))) ex.createAccount(crewCoffer(crewId), 0);
+  const n = Number(String(crewId).replace(/^c/, "")); // keep the live counter ahead on replay
+  if (Number.isFinite(n)) ex._cid = Math.max(ex._cid || 0, n);
+}
+function applyJoinCrew(ex, crewId, playerId) {
+  const c = ex.crews && ex.crews.get(crewId);
+  if (!c) throw new Error(`no such crew: ${crewId}`);
+  c.members.add(playerId);
+}
+function applyCrewDeposit(ex, crewId, playerId, amount) {
+  ex.accounts.get(playerId).poe -= amount;
+  ex.accounts.get(crewCoffer(crewId)).poe += amount;
+  ex.ledger.postPair(playerId, crewCoffer(crewId), amount, "crew_deposit");
+}
+function applyCrewWithdraw(ex, crewId, playerId, amount) {
+  ex.accounts.get(crewCoffer(crewId)).poe -= amount;
+  ex.accounts.get(playerId).poe += amount;
+  ex.ledger.postPair(crewCoffer(crewId), playerId, amount, "crew_withdraw");
+}
+
 // Skim a commerce tax from each fill's SELLER (who was just credited the sale
 // proceeds, so the funds are always there — tax < proceeds, never negative) to the
 // island's controlling flag. PoE-conserving transfer, posted to the ledger. Used
@@ -520,6 +548,8 @@ export class Market {
     if (this.ex._sid === undefined) this.ex._sid = 0; // ship-id counter
     if (!this.ex.sites) this.ex.sites = new Map();   // siteKey -> { owner, island, commodity }
     if (!this.ex.onboarded) this.ex.onboarded = new Set(); // players who got their one-time starter
+    if (!this.ex.crews) this.ex.crews = new Map();   // crewId -> { name, captain, members:Set }
+    if (this.ex._cid === undefined) this.ex._cid = 0; // crew-id counter
     this.recipes = RECIPES;
     this.store = opts.store ?? null;
     this._now = opts.now ?? (() => Date.now()); // wall clock for labor regen (injectable for tests)
@@ -863,6 +893,56 @@ export class Market {
     return shipId;
   }
 
+  // --- crews: form/join + the shared coffer (contribute / captain withdraws) ---
+  formCrew(playerId, name) {
+    this.ex.acct(playerId); // must be a real account
+    const nm = String(name ?? "").trim().slice(0, 40) || "Crew";
+    const crewId = `c${++this.ex._cid}`;
+    applyFormCrew(this.ex, crewId, playerId, nm);
+    if (this.store) this._record({ kind: "crew_form", crew: crewId, captain: playerId, name: nm });
+    return crewId;
+  }
+  joinCrew(playerId, crewId) {
+    this.ex.acct(playerId);
+    if (!this.ex.crews.has(crewId)) throw new Error("no such crew");
+    applyJoinCrew(this.ex, crewId, playerId);
+    if (this.store) this._record({ kind: "crew_join", crew: crewId, owner: playerId });
+  }
+  crewDeposit(playerId, crewId, amount) {
+    amount = Math.floor(amount);
+    const c = this.ex.crews.get(crewId);
+    if (!c) throw new Error("no such crew");
+    if (!c.members.has(playerId)) throw new Error("join the crew first");
+    if (amount <= 0) throw new Error("amount must be a positive integer");
+    if (this.ex.acct(playerId).poe < amount) throw new Error("insufficient PoE");
+    const lLen = this.ex.ledger.entries.length, tLen = this.ex.trades.length;
+    applyCrewDeposit(this.ex, crewId, playerId, amount);
+    if (this.store) { this._record({ kind: "crew_deposit", crew: crewId, owner: playerId, amount }); this._captureAudit(lLen, tLen); }
+  }
+  crewWithdraw(playerId, crewId, amount) {
+    amount = Math.floor(amount);
+    const c = this.ex.crews.get(crewId);
+    if (!c) throw new Error("no such crew");
+    if (c.captain !== playerId) throw new Error("only the crew captain can withdraw");
+    if (amount <= 0) throw new Error("amount must be a positive integer");
+    if (this.ex.acct(crewCoffer(crewId)).poe < amount) throw new Error("the coffer is short");
+    const lLen = this.ex.ledger.entries.length, tLen = this.ex.trades.length;
+    applyCrewWithdraw(this.ex, crewId, playerId, amount);
+    if (this.store) { this._record({ kind: "crew_withdraw", crew: crewId, owner: playerId, amount }); this._captureAudit(lLen, tLen); }
+  }
+  crewCofferOf(crewId) {
+    const a = this.ex.accounts.get(crewCoffer(crewId));
+    return a ? a.poe : 0;
+  }
+  // The crews this player belongs to (for the UI).
+  crewsOf(playerId) {
+    const out = [];
+    for (const [id, c] of this.ex.crews) {
+      if (c.members.has(playerId)) out.push({ id, name: c.name, coffer: this.crewCofferOf(id), members: c.members.size, captain: c.captain === playerId });
+    }
+    return out;
+  }
+
   // Goods washed up here from sunk ships, available to salvage (commodity -> qty).
   wreckHere() {
     const w = this.ex.accounts.get(`wreck:${this.island}`);
@@ -985,7 +1065,7 @@ export class Market {
       const voyage = s.voyage ? { from: s.voyage.from, to: s.voyage.to, arriveAt: s.voyage.arriveAt } : null;
       ships.push({ id, cls: s.cls, dockedAt: s.dockedAt, voyage, cargoCap: SHIP_CARGO[s.cls] ?? 0, hull: s.hull, maxHull: s.maxHull, hold });
     }
-    return { poe: a.poe, labor: laborAt(this.ex, playerId, now), holdings, orders, stalls, sites, ships, wreck: this.wreckHere(), pledged: this.isPledged(playerId), myFlags: this.flagsOf(playerId) };
+    return { poe: a.poe, labor: laborAt(this.ex, playerId, now), holdings, orders, stalls, sites, ships, wreck: this.wreckHere(), crews: this.crewsOf(playerId), pledged: this.isPledged(playerId), myFlags: this.flagsOf(playerId) };
   }
 
   // --- conservation totals (tests / ops) ---
@@ -1006,6 +1086,8 @@ export function replay(ex, intents) {
   if (ex._sid === undefined) ex._sid = 0;
   if (!ex.sites) ex.sites = new Map();
   if (!ex.onboarded) ex.onboarded = new Set();
+  if (!ex.crews) ex.crews = new Map();
+  if (ex._cid === undefined) ex._cid = 0;
   const ordered = [...intents].sort((a, b) => a.seq - b.seq);
   for (const it of ordered) {
     if (it.kind === "account") { ex.createAccount(it.owner, it.poe); ex.labor.set(it.owner, { amount: LABOR_START, ts: it.ts ?? 0 }); }
@@ -1039,6 +1121,10 @@ export function replay(ex, intents) {
     else if (it.kind === "extract") applyExtract(ex, it.owner, it.island, it.commodity, it.fee ?? EXTRACT_FEE, it.flag ?? null, it.ts ?? 0);
     else if (it.kind === "salvage") applySalvage(ex, it.owner, it.island, it.commodity, it.qty);
     else if (it.kind === "raider") { applyCreateShip(ex, it.ship, RAIDER, it.cls, it.dockedAt); for (const [c, q] of Object.entries(it.cargo)) ex.mint(`hold:${it.ship}`, c, q); }
+    else if (it.kind === "crew_form") applyFormCrew(ex, it.crew, it.captain, it.name);
+    else if (it.kind === "crew_join") applyJoinCrew(ex, it.crew, it.owner);
+    else if (it.kind === "crew_deposit") applyCrewDeposit(ex, it.crew, it.owner, it.amount);
+    else if (it.kind === "crew_withdraw") applyCrewWithdraw(ex, it.crew, it.owner, it.amount);
     else if (it.kind === "pledge") applyPledge(ex, it.owner, it.flag);
     else if (it.kind === "payout") applyPayout(ex, it.flag);
     else if (it.kind === "seize") applySeize(ex, it.owner, it.island, it.flag, it.cost ?? CONQUEST_COST);
