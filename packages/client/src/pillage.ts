@@ -3,16 +3,14 @@
 // The client only sends intents (rig:clears, plot) — the server decides outcomes.
 
 import { Client, Room } from "colyseus.js";
+import { getIdentity } from "./identity";
 
 const SERVER = (import.meta as any).env?.VITE_SERVER ?? "http://localhost:2567";
 const RIG_MS = Number(new URLSearchParams(location.search).get("rig") ?? 12000);
 
-// Same stable identity as the market, so battle plunder lands in this captain's wallet.
-const PLAYER_ID = (() => {
-  let id = localStorage.getItem("salt.playerId");
-  if (!id) { id = crypto.randomUUID(); localStorage.setItem("salt.playerId", id); }
-  return id;
-})();
+// Same proven identity as the market (secret -> derived id), so battle plunder lands in
+// this captain's wallet.
+let SECRET = "";
 const CELL = 46;
 const DIR = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // N,E,S,W
 const left = (h: number) => (h + 3) % 4, right = (h: number) => (h + 1) % 4;
@@ -123,14 +121,15 @@ function renderPlot() {
 
 async function boot() {
   const client = new Client(SERVER);
+  ({ secret: SECRET } = await getIdentity());
   // Arriving from "Go raiding" carries the real ship + locale: create a PRIVATE battle
   // for it (the server spawns an NPC raider and persists the outcome). Without them, the
   // standalone demo joins a shared sandbox room.
   const params = new URLSearchParams(location.search);
   const ship = params.get("ship"), isle = params.get("island");
   room = ship
-    ? await client.create("pillage", { rigMs: RIG_MS, playerId: PLAYER_ID, playerShipId: ship, island: isle ?? undefined })
-    : await client.joinOrCreate("pillage", { rigMs: RIG_MS, playerId: PLAYER_ID });
+    ? await client.create("pillage", { rigMs: RIG_MS, secret: SECRET, playerShipId: ship, island: isle ?? undefined })
+    : await client.joinOrCreate("pillage", { rigMs: RIG_MS, secret: SECRET });
 
   room.onStateChange(() => { hud(); if (!animating) draw(); });
   room.onMessage("resolution", (res: any) => { animate(res); });

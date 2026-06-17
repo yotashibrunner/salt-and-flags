@@ -20,6 +20,7 @@ import type { Market } from "../economy/market.mjs";
 import { STALL_COST, CONQUEST_COST, FLAGS, SHIP_CARGO, SHIP_PRICE, RAWS } from "../economy/market.mjs";
 import { getHub } from "../economy/hub.js";
 import { getIsland, laneDist, islandDanger } from "../world/registry.js";
+import { playerIdFromSecret } from "../identity.mjs";
 
 class LevelState extends Schema {
   @type("number") price = 0;
@@ -325,15 +326,14 @@ export class MarketRoom extends Room<MarketState> {
     }, 60000);
   }
 
-  // Stable cross-island identity: the client presents a player id (persisted in
-  // its localStorage, sent on every join). All accounts/holdings/labor/stalls/flag
-  // membership key off this — so one player has ONE wallet on every island and
-  // across reconnects, not a fresh per-room sessionId account. (Identity is by
-  // assertion for now; verifying a signed credential is a later hardening.)
-  onAuth(client: Client, options: { playerId?: string }) {
-    const raw = typeof options?.playerId === "string" ? options.playerId.trim() : "";
-    if (!raw) throw new Error("missing playerId");
-    return { playerId: raw.slice(0, 64) };
+  // Stable cross-island identity, now PROVEN not asserted: the client presents a secret;
+  // the server derives the player id as SHA-256(secret). All accounts/holdings/labor/stalls
+  // /flags/crews key off this id — one wallet on every island and across reconnects — and a
+  // wallet can't be hijacked by claiming its id, since you'd need the secret behind it.
+  async onAuth(_client: Client, options: { secret?: string }) {
+    const secret = typeof options?.secret === "string" ? options.secret.trim() : "";
+    if (!secret) throw new Error("missing secret");
+    return { playerId: await playerIdFromSecret(secret) };
   }
 
   private pid(client: Client): string {

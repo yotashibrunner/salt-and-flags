@@ -18,6 +18,7 @@ import { Schema, type, MapSchema } from "@colyseus/schema";
 import { resolveRound as resolveBattleRound, enemyPlot, legalizePlot, BOARD, MOVES_PER_ROUND } from "../pillage/battle.mjs";
 import type { Ship } from "../pillage/battle.mjs";
 import { getHub } from "../economy/hub.js";
+import { playerIdFromSecret } from "../identity.mjs";
 
 class ShipState extends Schema {
   @type("number") col = 0;
@@ -58,12 +59,12 @@ export class PillageRoom extends Room<BattleState> {
   private enemyShipId?: string;
   private island?: string; // where the battle happens (enemy wreck/salvage lands here)
 
-  // Stable identity (shared with the market): plunder is paid to this player id's
-  // market wallet, so winning a battle enriches the same captain who trades.
-  onAuth(_client: Client, options: { playerId?: string }) {
-    const raw = typeof options?.playerId === "string" ? options.playerId.trim() : "";
-    if (!raw) throw new Error("missing playerId");
-    return { playerId: raw.slice(0, 64) };
+  // Proven identity (shared with the market): the id is derived from the client's secret,
+  // so plunder is paid to the same wallet the captain trades with and can't be hijacked.
+  async onAuth(_client: Client, options: { secret?: string }) {
+    const secret = typeof options?.secret === "string" ? options.secret.trim() : "";
+    if (!secret) throw new Error("missing secret");
+    return { playerId: await playerIdFromSecret(secret) };
   }
   private pid(client: Client): string {
     return (client.auth as { playerId: string }).playerId;

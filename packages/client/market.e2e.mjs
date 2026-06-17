@@ -29,8 +29,10 @@ const client = new Client(SERVER);
 
 // join + attach handlers + request initial snapshot. Each player has a stable id.
 let pidSeq = 0;
+// `secret` stands in for a player here; the server derives the wallet id from it, so the
+// same secret = the same captain across islands and reconnects.
 async function connect(island = ISLAND, playerId = `e2e-${++pidSeq}`) {
-  const room = await client.joinOrCreate("market", { island, playerId });
+  const room = await client.joinOrCreate("market", { island, secret: playerId });
   const state = { bal: null };
   room.onMessage("hello", () => {});
   room.onMessage("balances", (b) => (state.bal = b));
@@ -40,15 +42,15 @@ async function connect(island = ISLAND, playerId = `e2e-${++pidSeq}`) {
   return { room, state, playerId };
 }
 
-// auth: a join without a playerId is rejected
+// auth: a join without a secret is rejected
 let noPid = false;
 try { await client.joinOrCreate("market", { island: ISLAND }); } catch { noPid = true; }
-assert.ok(noPid, "joining without a playerId must be rejected");
-console.log("✔ join without playerId rejected");
+assert.ok(noPid, "joining without a secret must be rejected");
+console.log("✔ join without secret rejected");
 
 // unknown island ids are rejected by the room (onCreate throws -> join fails)
 let rejected = false;
-try { await client.joinOrCreate("market", { island: "no-such-island", playerId: "x" }); }
+try { await client.joinOrCreate("market", { island: "no-such-island", secret: "x" }); }
 catch { rejected = true; }
 assert.ok(rejected, "joining an unknown island must be rejected");
 console.log("✔ unknown island rejected");

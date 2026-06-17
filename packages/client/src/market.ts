@@ -6,16 +6,12 @@
 // Islands come from GET /world; picking one joins that island's market room.
 
 import { Client, Room } from "colyseus.js";
+import { getIdentity } from "./identity";
 
 const SERVER = (import.meta as any).env?.VITE_SERVER ?? "http://localhost:2567";
 
-// Stable identity: a player id persisted in localStorage and sent on every join,
-// so this player has one wallet across every island and across reloads.
-const PLAYER_ID = (() => {
-  let id = localStorage.getItem("salt.playerId");
-  if (!id) { id = crypto.randomUUID(); localStorage.setItem("salt.playerId", id); }
-  return id;
-})();
+// Proven identity: a secret in localStorage; the server derives our wallet id from it.
+let SECRET = "";
 
 interface Level { price: number; qty: number; }
 interface RestingOrder { id: number; commodity: string; side: "buy" | "sell"; price: number; qty: number; }
@@ -278,7 +274,7 @@ async function joinIsland(islandId: string) {
   island = islandId;
   renderBalances();
   try {
-    room = await client.joinOrCreate("market", { island: islandId, playerId: PLAYER_ID });
+    room = await client.joinOrCreate("market", { island: islandId, secret: SECRET });
   } catch (e: any) {
     return flash(`join failed: ${e?.message ?? e}`);
   }
@@ -315,6 +311,7 @@ async function joinIsland(islandId: string) {
 }
 
 async function boot() {
+  ({ secret: SECRET } = await getIdentity());
   const world: { islands: WorldIsland[]; lanes: WorldLane[] } = await (await fetch(`${SERVER}/world`)).json();
   const islands = world.islands.slice().sort((a, b) => a.name.localeCompare(b.name));
   islandName = new Map(world.islands.map((i) => [i.id, i.name]));

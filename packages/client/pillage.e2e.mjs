@@ -16,7 +16,7 @@ async function until(fn, ms = 6000) {
 }
 
 const client = new Client(SERVER);
-const room = await client.joinOrCreate("pillage", { rigMs: 300, playerId: "e2e-pillage" });
+const room = await client.joinOrCreate("pillage", { rigMs: 300, secret: "e2e-pillage" });
 
 let resolution = null;
 room.onMessage("resolution", (m) => (resolution = m));
@@ -52,7 +52,7 @@ await room.leave();
 const HERO = `plunder-${Date.now()}`; // fresh captain so the wallet check is exact
 // player at (2,4) facing N (starboard = east); a 1-hull enemy sits one cell east
 const battle = await client.joinOrCreate("pillage", {
-  rigMs: 300, playerId: HERO, enemyMoveBudget: 0, // hold the enemy still for a clean kill
+  rigMs: 300, secret: HERO, enemyMoveBudget: 0, // hold the enemy still for a clean kill
   setup: { player: { col: 2, row: 4, heading: 0 }, enemy: { col: 3, row: 4, hull: 1 } },
 });
 let ended = null;
@@ -70,7 +70,7 @@ await battle.leave();
 
 // the plunder landed in the SAME player's market wallet (cross-subsystem)
 const world = await (await fetch(`${SERVER}/world`)).json();
-const mkt = await client.joinOrCreate("market", { island: world.islands[0].id, playerId: HERO });
+const mkt = await client.joinOrCreate("market", { island: world.islands[0].id, secret: HERO });
 let bal = null;
 mkt.onMessage("hello", () => {});
 mkt.onMessage("balances", (b) => (bal = b));
