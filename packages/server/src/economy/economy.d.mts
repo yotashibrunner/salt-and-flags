@@ -62,6 +62,7 @@ export class Exchange {
   _sid?: number;                          // ship-id counter (Market layer)
   upkeepTs?: Map<string, number>;         // `${owner}:${island}` -> last upkeep timestamp
   sites?: Map<string, { owner: string; island: string; commodity: string }>; // extraction sites
+  onboarded?: Set<string>; // players who have received their one-time starter ship + goods
 
   createAccount(id: string, poe?: number, inv?: Record<string, number>): Account;
   acct(id: string): Account;

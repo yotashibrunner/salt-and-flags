@@ -95,8 +95,9 @@ test("invariant fuzz: random ops across islands/players never break conservation
   const ops = [
     "buy", "sell", "cancel", "build", "produce", "buildSite", "extract",
     "load", "unload", "move", "pledge", "seize", "payout", "award", "restock",
-    "upkeep", "repair", "damage",
+    "upkeep", "repair", "damage", "buyShip",
   ];
+  const shipClasses = ["sloop", "brig", "frigate", "galleon"];
 
   for (let i = 0; i < 4000; i++) {
     const m = markets[pick(rnd, islands)];
@@ -148,6 +149,7 @@ test("invariant fuzz: random ops across islands/players never break conservation
           if (sh) m.resolveShip(sh.id, 1 + ((rnd() * sh.maxHull) | 0)); // 1..maxHull -> never sinks here
           break;
         }
+        case "buyShip": m.buyShip(p, pick(rnd, shipClasses)); break; // throws on insufficient PoE
       }
     } catch {
       // invalid for the current state (insufficient funds/goods, not docked, etc.)

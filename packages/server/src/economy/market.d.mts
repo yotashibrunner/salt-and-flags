@@ -24,6 +24,7 @@ export const DEMAND_LEVY_BPS: number;
 export const FINISHED: Set<string>;
 export const SHIP_HULL: Record<string, number>;
 export const REPAIR_PER_HULL: number;
+export const SHIP_PRICE: Record<string, number>;
 export const CROWN: string;
 export const SINK_BURN_BPS: number;
 export const LISTING_FEE_BPS: number;
@@ -51,7 +52,8 @@ export const RECIPES: Recipe[];
 export type Intent =
   | { seq: number; kind: "account"; owner: string; poe: number; ts: number }
   | { seq: number; kind: "grant"; owner: string; island: string; inv: Record<string, number> }
-  | { seq: number; kind: "ship"; id: string; owner: string; cls: string; dockedAt: string }
+  | { seq: number; kind: "onboard"; owner: string; island: string; inv: Record<string, number>; cls: string; ship: string }
+  | { seq: number; kind: "buyship"; owner: string; cls: string; ship: string; price: number; flag: string | null; island: string }
   | { seq: number; kind: "place"; owner: string; island: string; commodity: string; side: Side; price: number; qty: number; flag: string | null; rate: number; fee: number; levy: number }
   | { seq: number; kind: "cancel"; ref: number }
   | { seq: number; kind: "load"; owner: string; ship: string; commodity: string; qty: number; island: string }
@@ -151,6 +153,7 @@ export class Market {
   build(playerId: string, recipeId: string): Stall;
   buildSite(playerId: string, commodity: string): { owner: string; island: string; commodity: string };
   extract(playerId: string, commodity: string): void;
+  buyShip(playerId: string, cls: string): string;
   readonly flag: string | null;
   flagTreasury(): number;
   flagMemberCount(): number;

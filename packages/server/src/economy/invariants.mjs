@@ -22,7 +22,7 @@ const TERMINAL_SINKS = new Set([CROWN, "warchest"]); // accounts that only ever 
 // Next slice: assert every system-touching pair's reason is in FAUCET ∪ SINK and
 // that ΔtotalPoe over a window == Σfaucet − Σsink.
 export const FAUCET_REASONS = new Set(["plunder"]);
-export const SINK_REASONS = new Set(["conquest", "upkeep", "fee", "repair", "extract", "demand_levy"]);
+export const SINK_REASONS = new Set(["conquest", "upkeep", "fee", "repair", "extract", "demand_levy", "shipyard"]);
 export const TRANSFER_REASONS = new Set([
   "escrow_buy", "fill", "price_improve_refund", "cancel_refund",
   "stall_levy", "trade_tax", "flag_payout", "flag_levy", "site_levy",

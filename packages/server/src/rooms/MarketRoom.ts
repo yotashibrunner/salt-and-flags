@@ -17,7 +17,7 @@ import type { Client } from "colyseus";
 const { Room } = colyseusPkg;
 import { Schema, type, MapSchema, ArraySchema } from "@colyseus/schema";
 import type { Market } from "../economy/market.mjs";
-import { STALL_COST, CONQUEST_COST, FLAGS, SHIP_CARGO } from "../economy/market.mjs";
+import { STALL_COST, CONQUEST_COST, FLAGS, SHIP_CARGO, SHIP_PRICE } from "../economy/market.mjs";
 import { getHub } from "../economy/hub.js";
 import { getIsland } from "../world/registry.js";
 
@@ -55,6 +55,7 @@ interface SeizeMsg { flag: string; }
 interface CargoMsg { shipId: string; commodity: string; qty: number; }
 interface MoveMsg { shipId: string; toIsland: string; }
 interface CommodityMsg { commodity: string; }
+interface BuyShipMsg { cls: string; }
 
 export class MarketRoom extends Room<MarketState> {
   maxClients = 64;
@@ -178,6 +179,17 @@ export class MarketRoom extends Room<MarketState> {
         await this.market.flush();
         this.syncFlag(); // the extraction fee's flag share fed the flag
         this.pushBalances(); // raw added to holdings; labor + PoE spent
+      } catch (e) {
+        client.send("error", { message: errMsg(e) });
+      }
+    });
+
+    this.onMessage<BuyShipMsg>("buyShip", async (client, msg) => {
+      try {
+        this.market.buyShip(this.pid(client), String(msg?.cls));
+        await this.market.flush();
+        this.syncFlag(); // the purchase's flag share fed the flag
+        this.pushBalances(); // PoE spent; a new hull joins the fleet
       } catch (e) {
         client.send("error", { message: errMsg(e) });
       }
@@ -308,6 +320,7 @@ export class MarketRoom extends Room<MarketState> {
       flags: FLAGS,
       conquestCost: CONQUEST_COST,
       shipCargo: SHIP_CARGO, // cargo capacity per ship class (for the load/sail UI)
+      shipPrice: SHIP_PRICE, // shipyard purchase price per class
     });
     this.sendBalances(client);
   }
